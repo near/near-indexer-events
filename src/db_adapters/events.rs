@@ -1,14 +1,10 @@
-use actix_diesel::{AsyncError, Database};
-use diesel::PgConnection;
+use super::event_types;
+use near_lake_framework::near_indexer_primitives;
 use tracing::warn;
 
-use crate::db_adapters::assets;
-
-use super::event_types;
-
 pub(crate) async fn store_events(
-    pool: &Database<PgConnection>,
-    streamer_message: &near_indexer::StreamerMessage,
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    streamer_message: &near_indexer_primitives::StreamerMessage,
 ) -> anyhow::Result<()> {
     let futures = streamer_message.shards.iter().map(|shard| {
         collect_and_store_events(pool, shard, streamer_message.block.header.timestamp)
@@ -17,33 +13,9 @@ pub(crate) async fn store_events(
     futures::future::try_join_all(futures).await.map(|_| ())
 }
 
-pub(crate) async fn detect_db_error(
-    async_error: &AsyncError<diesel::result::Error>,
-    duplicate_constraint_name: &str,
-    broken_data_constraint_name: &str,
-) -> bool {
-    if let actix_diesel::AsyncError::Execute(diesel::result::Error::DatabaseError(
-        diesel::result::DatabaseErrorKind::UniqueViolation,
-        ref error_info,
-    )) = *async_error
-    {
-        let constraint_name = error_info.constraint_name().unwrap_or("");
-        if constraint_name == duplicate_constraint_name {
-            // Everything is fine, we have already written this to the DB
-            return true;
-        } else if constraint_name == broken_data_constraint_name {
-            warn!(
-                target: crate::INDEXER_FOR_EXPLORER,
-                "assets::events: data inconsistency is found"
-            );
-        }
-    }
-    false
-}
-
 async fn collect_and_store_events(
-    pool: &Database<PgConnection>,
-    shard: &near_indexer::IndexerShard,
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    shard: &near_indexer_primitives::IndexerShard,
     block_timestamp: u64,
 ) -> anyhow::Result<()> {
     let mut ft_events_with_outcomes = Vec::new();
@@ -53,23 +25,23 @@ async fn collect_and_store_events(
         let events = extract_events(outcome);
         for event in events {
             match event {
-                assets::event_types::NearEvent::Nep141(ft_event) => {
+                event_types::NearEvent::Nep141(ft_event) => {
                     ft_events_with_outcomes.push((ft_event, outcome));
                 }
-                assets::event_types::NearEvent::Nep171(nft_event) => {
+                event_types::NearEvent::Nep171(nft_event) => {
                     nft_events_with_outcomes.push((nft_event, outcome));
                 }
             }
         }
     }
 
-    let ft_future = assets::fungible_token_events::store_ft_events(
+    let ft_future = super::fungible_token_events::store_ft_events(
         pool,
         shard,
         block_timestamp,
         &ft_events_with_outcomes,
     );
-    let nft_future = assets::non_fungible_token_events::store_nft_events(
+    let nft_future = super::non_fungible_token_events::store_nft_events(
         pool,
         shard,
         block_timestamp,
@@ -80,7 +52,7 @@ async fn collect_and_store_events(
 }
 
 fn extract_events(
-    outcome: &near_indexer::IndexerExecutionOutcomeWithReceipt,
+    outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
 ) -> Vec<event_types::NearEvent> {
     let prefix = "EVENT_JSON:";
     outcome.execution_outcome.outcome.logs.iter().filter_map(|untrimmed_log| {
@@ -95,7 +67,7 @@ fn extract_events(
             Ok(result) => Some(result),
             Err(err) => {
                 warn!(
-                    target: crate::INDEXER_FOR_EXPLORER,
+                    target: crate::INDEXER,
                     "Provided event log does not correspond to any of formats defined in NEP. Will ignore this event. \n {:#?} \n{:#?}",
                     err,
                     untrimmed_log,

@@ -6,6 +6,7 @@ use std::env;
 use tracing_subscriber::EnvFilter;
 
 use crate::configs::Opts;
+use near_lake_framework::near_indexer_primitives;
 
 mod configs;
 mod db_adapters;
@@ -24,14 +25,6 @@ async fn main() -> anyhow::Result<()> {
 
     let opts: Opts = Opts::parse();
 
-    // let options = sqlx::postgres::PgConnectOptions::new()
-    //     .host(&env::var("DB_HOST")?)
-    //     .port(env::var("DB_PORT")?.parse()?)
-    //     .username(&env::var("DB_USER")?)
-    //     .password(&env::var("DB_PASSWORD")?)
-    //     .database(&env::var("DB_NAME")?)
-    //     .extra_float_digits(2);
-
     // let pool = sqlx::PgPool::connect_with(options).await?;
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
     // TODO Error: while executing migrations: error returned from database: 1128 (HY000): Function 'near_indexer.GET_LOCK' is not defined
@@ -41,15 +34,18 @@ async fn main() -> anyhow::Result<()> {
     //     Some(x) => x,
     //     None => models::start_after_interruption(&pool).await?,
     // };
-    let config = near_lake_framework::LakeConfig {
-        s3_config: None,
-        s3_bucket_name: opts.s3_bucket_name.clone(),
-        s3_region_name: opts.s3_region_name.clone(),
-        start_block_height: 11993900, //opts.start_block_height.unwrap(),
-    };
+    let start_block_height: u64 = 60116605; //53400020;
+
+    let config = near_lake_framework::LakeConfigBuilder::default()
+        .s3_bucket_name(opts.s3_bucket_name)
+        .s3_region_name(opts.s3_region_name)
+        .start_block_height(start_block_height)
+        .blocks_preload_pool_size(100)
+        .build()?;
     init_tracing();
 
-    let stream = near_lake_framework::streamer(config);
+    let (lake_handle, stream) = near_lake_framework::streamer(config);
+    // let json_rpc_client = near_jsonrpc_client::JsonRpcClient::connect(&opts.near_archival_rpc_url);
 
     let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
         .map(|streamer_message| handle_streamer_message(streamer_message, &pool))
@@ -58,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     // let mut time_now = std::time::Instant::now();
     while let Some(handle_message) = handlers.next().await {
         match handle_message {
-            Ok(block_height) => {
+            Ok(_block_height) => {
                 // let elapsed = time_now.elapsed();
                 // println!(
                 //     "Elapsed time spent on block {}: {:.3?}",
@@ -72,7 +68,12 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    Ok(())
+    // propagate errors from the Lake Framework
+    match lake_handle.await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e),
+        Err(e) => Err(anyhow::Error::from(e)), // JoinError
+    }
 }
 
 async fn handle_streamer_message(
@@ -80,26 +81,16 @@ async fn handle_streamer_message(
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<u64> {
     // if streamer_message.block.header.height % 100 == 0 {
-        eprintln!(
-            "{} / shards {}",
-            streamer_message.block.header.height,
-            streamer_message.shards.len()
-        );
+    eprintln!(
+        "{} / shards {}",
+        streamer_message.block.header.height,
+        streamer_message.shards.len()
+    );
     // }
 
-    let accounts_future = db_adapters::accounts::store_accounts(
-        pool,
-        &streamer_message.shards,
-        streamer_message.block.header.height,
-    );
+    let events_future = db_adapters::events::store_events(pool, &streamer_message);
 
-    let access_keys_future = db_adapters::access_keys::store_access_keys(
-        pool,
-        &streamer_message.shards,
-        streamer_message.block.header.height,
-    );
-
-    try_join!(accounts_future, access_keys_future)?;
+    try_join!(events_future)?;
     Ok(streamer_message.block.header.height)
 }
 
