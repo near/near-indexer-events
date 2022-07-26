@@ -1,6 +1,12 @@
 use super::event_types;
+use crate::db_adapters::event_types::{Nep141EventKind, Nep171EventKind};
 use near_lake_framework::near_indexer_primitives;
 use tracing::warn;
+
+pub(crate) enum Event {
+    Nep141,
+    Nep171,
+}
 
 pub(crate) async fn store_events(
     pool: &sqlx::Pool<sqlx::Postgres>,
@@ -20,28 +26,39 @@ async fn collect_and_store_events(
 ) -> anyhow::Result<()> {
     let mut ft_events_with_outcomes = Vec::new();
     let mut nft_events_with_outcomes = Vec::new();
-
+    // FT, NFT, MT can be shuffled. We can have events in blocks like this: FT MT FT NFT FT FT
+    // the index should go through each standard
+    let mut ft_index: usize = 0;
+    let mut nft_index: usize = 0;
     for outcome in &shard.receipt_execution_outcomes {
         let events = extract_events(outcome);
         for event in events {
             match event {
-                event_types::NearEvent::Nep141(ft_event) => {
-                    ft_events_with_outcomes.push((ft_event, outcome));
+                event_types::NearEvent::Nep141(ft_events) => {
+                    let events_count = get_coin_events_count(&ft_events.event_kind);
+                    ft_events_with_outcomes.push(super::coin_events::FtEvent {
+                        events: ft_events,
+                        outcome: outcome.clone(),
+                        starting_index: ft_index,
+                    });
+                    ft_index += events_count;
                 }
-                event_types::NearEvent::Nep171(nft_event) => {
-                    nft_events_with_outcomes.push((nft_event, outcome));
+                event_types::NearEvent::Nep171(nft_events) => {
+                    let events_count = get_nft_events_count(&nft_events.event_kind);
+                    nft_events_with_outcomes.push(super::nft_events::NftEvent {
+                        events: nft_events,
+                        outcome: outcome.clone(),
+                        starting_index: nft_index,
+                    });
+                    nft_index += events_count;
                 }
             }
         }
     }
 
-    let ft_future = super::fungible_token_events::store_ft_events(
-        pool,
-        shard,
-        block_timestamp,
-        &ft_events_with_outcomes,
-    );
-    let nft_future = super::non_fungible_token_events::store_nft_events(
+    let ft_future =
+        super::coin_events::store_ft_events(pool, shard, block_timestamp, &ft_events_with_outcomes);
+    let nft_future = super::nft_events::store_nft_events(
         pool,
         shard,
         block_timestamp,
@@ -49,6 +66,23 @@ async fn collect_and_store_events(
     );
     futures::try_join!(ft_future, nft_future)?;
     Ok(())
+}
+
+fn get_coin_events_count(event: &Nep141EventKind) -> usize {
+    match event {
+        Nep141EventKind::FtMint(v) => v.len(),
+        // we store 2 lines for each transfer because there are 2 affected account ids
+        Nep141EventKind::FtTransfer(v) => v.len() * 2,
+        Nep141EventKind::FtBurn(v) => v.len(),
+    }
+}
+
+fn get_nft_events_count(event: &Nep171EventKind) -> usize {
+    match event {
+        Nep171EventKind::NftMint(v) => v.len(),
+        Nep171EventKind::NftTransfer(v) => v.len(),
+        Nep171EventKind::NftBurn(v) => v.len(),
+    }
 }
 
 fn extract_events(

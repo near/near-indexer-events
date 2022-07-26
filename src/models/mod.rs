@@ -4,8 +4,8 @@ use futures::future::try_join_all;
 
 pub use indexer_accounts::FieldCount;
 
-pub(crate) mod fungible_token_events;
-pub(crate) mod non_fungible_token_events;
+pub(crate) mod coin_events;
+pub(crate) mod nft_events;
 
 pub trait FieldCount {
     /// Get the number of fields on a struct.
