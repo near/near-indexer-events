@@ -1,8 +1,10 @@
 // TODO cleanup imports in all the files in the end
+use cached::SizedCache;
 use clap::Parser;
 use dotenv::dotenv;
-use futures::{try_join, StreamExt};
+use futures::StreamExt;
 use std::env;
+use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
 
 use crate::configs::Opts;
@@ -11,6 +13,7 @@ use near_lake_framework::near_indexer_primitives;
 mod configs;
 mod db_adapters;
 mod models;
+mod rpc_helpers;
 
 // Categories for logging
 // TODO naming
@@ -19,11 +22,23 @@ pub(crate) const INDEXER: &str = "indexer";
 const INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 const MAX_DELAY_TIME: std::time::Duration = std::time::Duration::from_secs(120);
 
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct AccountWithContract {
+    pub account_id: near_primitives::types::AccountId,
+    pub contract_account_id: near_primitives::types::AccountId,
+}
+
+pub type FtBalanceCache =
+    std::sync::Arc<Mutex<SizedCache<AccountWithContract, near_primitives::types::Balance>>>;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
 
     let opts: Opts = Opts::parse();
+
+    // todo it's a good idea to profile it.
+    //  From time to time, it works slow as hell, sometimes rpc is not responding at all. Probably it's UAE network jokes
 
     // let pool = sqlx::PgPool::connect_with(options).await?;
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
@@ -34,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
     //     Some(x) => x,
     //     None => models::start_after_interruption(&pool).await?,
     // };
-    let start_block_height: u64 = 60116605; //53400020;
+    let start_block_height: u64 = 60116646; //60116605; //53400020;
 
     let config = near_lake_framework::LakeConfigBuilder::default()
         .s3_bucket_name(opts.s3_bucket_name)
@@ -45,10 +60,16 @@ async fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let (lake_handle, stream) = near_lake_framework::streamer(config);
-    // let json_rpc_client = near_jsonrpc_client::JsonRpcClient::connect(&opts.near_archival_rpc_url);
+    let json_rpc_client = near_jsonrpc_client::JsonRpcClient::connect(&opts.near_archival_rpc_url);
+
+    // We want to prevent unnecessary RPC queries to find previous balance
+    let ft_balance_cache: FtBalanceCache =
+        std::sync::Arc::new(Mutex::new(SizedCache::with_size(100_000)));
 
     let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
-        .map(|streamer_message| handle_streamer_message(streamer_message, &pool))
+        .map(|streamer_message| {
+            handle_streamer_message(streamer_message, &pool, &json_rpc_client, &ft_balance_cache)
+        })
         .buffer_unordered(1usize);
 
     // let mut time_now = std::time::Instant::now();
@@ -79,6 +100,8 @@ async fn main() -> anyhow::Result<()> {
 async fn handle_streamer_message(
     streamer_message: near_indexer_primitives::StreamerMessage,
     pool: &sqlx::Pool<sqlx::Postgres>,
+    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
+    ft_balance_cache: &FtBalanceCache,
 ) -> anyhow::Result<u64> {
     // if streamer_message.block.header.height % 100 == 0 {
     eprintln!(
@@ -88,9 +111,8 @@ async fn handle_streamer_message(
     );
     // }
 
-    let events_future = db_adapters::events::store_events(pool, &streamer_message);
-
-    try_join!(events_future)?;
+    db_adapters::events::store_events(pool, json_rpc_client, &streamer_message, ft_balance_cache)
+        .await?;
     Ok(streamer_message.block.header.height)
 }
 

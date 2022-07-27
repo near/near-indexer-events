@@ -34,7 +34,7 @@ fn compose_nft_db_events(
     for NftEvent {
         events,
         outcome,
-        mut starting_index,
+        starting_index,
     } in events
     {
         let contract_id = &outcome.receipt.receiver_id;
@@ -47,7 +47,7 @@ fn compose_nft_db_events(
                                 block_timestamp,
                                 shard_id,
                                 Event::Nep171,
-                                starting_index,
+                                starting_index + nft_events.len(),
                             )?,
                             receipt_id: outcome.receipt.receipt_id.to_string(),
                             block_timestamp: BigDecimal::from(block_timestamp),
@@ -65,7 +65,6 @@ fn compose_nft_db_events(
                                 .as_ref()
                                 .map(|s| s.escape_default().to_string()),
                         });
-                        starting_index += 1;
                     }
                 }
             }
@@ -77,7 +76,7 @@ fn compose_nft_db_events(
                                 block_timestamp,
                                 shard_id,
                                 Event::Nep171,
-                                starting_index,
+                                starting_index + nft_events.len(),
                             )?,
                             receipt_id: outcome.receipt.receipt_id.to_string(),
                             block_timestamp: BigDecimal::from(block_timestamp),
@@ -100,7 +99,6 @@ fn compose_nft_db_events(
                                 .as_ref()
                                 .map(|s| s.escape_default().to_string()),
                         });
-                        starting_index += 1;
                     }
                 }
             }
@@ -112,7 +110,7 @@ fn compose_nft_db_events(
                                 block_timestamp,
                                 shard_id,
                                 Event::Nep171,
-                                starting_index,
+                                starting_index + nft_events.len(),
                             )?,
                             receipt_id: outcome.receipt.receipt_id.to_string(),
                             block_timestamp: BigDecimal::from(block_timestamp),
@@ -133,7 +131,6 @@ fn compose_nft_db_events(
                                 .as_ref()
                                 .map(|s| s.escape_default().to_string()),
                         });
-                        starting_index += 1;
                     }
                 }
             }

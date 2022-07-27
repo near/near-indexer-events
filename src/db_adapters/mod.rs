@@ -23,13 +23,11 @@ fn get_status(status: &ExecutionStatusView) -> String {
     .to_string()
 }
 
-// timestamp_millis * 100_000_000_000 * 100_000_000_000 + chunk_index * 10_000_000 + assets_type * 10_000 + index_of_event
-// todo naming
 fn compose_db_index(
     block_timestamp: u64,
     shard_id: &near_primitives::types::ShardId,
     event: events::Event,
-    index: usize,
+    event_index: usize,
 ) -> anyhow::Result<BigDecimal> {
     let timestamp_millis: u128 = (block_timestamp as u128) / 1_000_000;
     // maybe it's better to have here 141, 171, but in this case we will not use most of the numbers and overflow our formula
@@ -41,6 +39,6 @@ fn compose_db_index(
     let db_index: u128 = timestamp_millis * 100_000_000_000 * 100_000_000_000
         + (*shard_id as u128) * 10_000_000
         + event_type_index * 10_000
-        + (index as u128);
+        + (event_index as u128);
     Ok(BigDecimal::from_str(&db_index.to_string())?)
 }

@@ -15,10 +15,6 @@ pub(crate) struct Opts {
     /// Enabled Indexer for Explorer debug level of logs
     #[clap(long)]
     pub debug: bool,
-    // todo
-    // /// Store initial data from genesis like Accounts, AccessKeys
-    // #[clap(long)]
-    // pub store_genesis: bool,
     /// AWS S3 bucket name to get the stream from
     #[clap(long)]
     pub s3_bucket_name: String,
@@ -28,4 +24,6 @@ pub(crate) struct Opts {
     /// Block height to start the stream from. If None, start from interruption
     #[clap(long, short)]
     pub start_block_height: Option<u64>,
+    #[clap(long, short)]
+    pub near_archival_rpc_url: String,
 }

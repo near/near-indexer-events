@@ -10,10 +10,18 @@ pub(crate) enum Event {
 
 pub(crate) async fn store_events(
     pool: &sqlx::Pool<sqlx::Postgres>,
+    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     streamer_message: &near_indexer_primitives::StreamerMessage,
+    ft_balance_cache: &crate::FtBalanceCache,
 ) -> anyhow::Result<()> {
     let futures = streamer_message.shards.iter().map(|shard| {
-        collect_and_store_events(pool, shard, streamer_message.block.header.timestamp)
+        collect_and_store_events(
+            pool,
+            json_rpc_client,
+            shard,
+            &streamer_message.block.header,
+            ft_balance_cache,
+        )
     });
 
     futures::future::try_join_all(futures).await.map(|_| ())
@@ -21,8 +29,10 @@ pub(crate) async fn store_events(
 
 async fn collect_and_store_events(
     pool: &sqlx::Pool<sqlx::Postgres>,
+    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     shard: &near_indexer_primitives::IndexerShard,
-    block_timestamp: u64,
+    block_header: &near_indexer_primitives::views::BlockHeaderView,
+    ft_balance_cache: &crate::FtBalanceCache,
 ) -> anyhow::Result<()> {
     let mut ft_events_with_outcomes = Vec::new();
     let mut nft_events_with_outcomes = Vec::new();
@@ -56,12 +66,18 @@ async fn collect_and_store_events(
         }
     }
 
-    let ft_future =
-        super::coin_events::store_ft_events(pool, shard, block_timestamp, &ft_events_with_outcomes);
+    let ft_future = super::coin_events::store_ft_events(
+        pool,
+        json_rpc_client,
+        shard,
+        block_header,
+        &ft_events_with_outcomes,
+        ft_balance_cache,
+    );
     let nft_future = super::nft_events::store_nft_events(
         pool,
         shard,
-        block_timestamp,
+        block_header.timestamp,
         &nft_events_with_outcomes,
     );
     futures::try_join!(ft_future, nft_future)?;
