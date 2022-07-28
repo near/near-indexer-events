@@ -1,4 +1,4 @@
-This is a tool to move the data from S3 to SingleStore in a structured way.
+This is a tool to move the data from S3 to Postgres-compatible DB in a structured way.
 
 ## Migration
 
