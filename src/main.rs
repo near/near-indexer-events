@@ -53,7 +53,8 @@ async fn main() -> anyhow::Result<()> {
     // wrap near
     // ft_transfer 68814912
     // near_withdraw 68814918
-    let start_block_height: u64 = 68814912; // 68814906 ; //60116646; //60116605; //53400020;
+    // ft_transfer_call 68814941
+    let start_block_height: u64 = 68814941; //60116646; //60116605; //53400020;
 
     let config = near_lake_framework::LakeConfigBuilder::default()
         .s3_bucket_name(opts.s3_bucket_name)

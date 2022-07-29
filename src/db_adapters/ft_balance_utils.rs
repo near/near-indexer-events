@@ -1,6 +1,7 @@
 use bigdecimal::BigDecimal;
 use cached::Cached;
 use near_lake_framework::near_indexer_primitives;
+use num_traits::Signed;
 use std::ops::Add;
 use std::str::FromStr;
 
@@ -14,7 +15,7 @@ pub(crate) async fn update_cache_and_get_balance(
 ) -> anyhow::Result<BigDecimal> {
     let account_with_contract = crate::AccountWithContract {
         account_id: near_primitives::types::AccountId::from_str(account_id)?,
-        contract_account_id: contract_id,
+        contract_account_id: contract_id.clone(),
     };
     let prev_absolute_amount = BigDecimal::from_str(
         &get_balance_retriable(
@@ -27,6 +28,14 @@ pub(crate) async fn update_cache_and_get_balance(
         .to_string(),
     )?;
     let absolute_amount = prev_absolute_amount.add(delta_amount);
+
+    if absolute_amount.is_negative() {
+        anyhow::bail!(
+            "Balance is negative for account {}, contract {}",
+            account_id,
+            contract_id
+        )
+    }
     save_latest_ft_balance(
         account_with_contract,
         absolute_amount.to_string().parse::<u128>()?,

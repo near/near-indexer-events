@@ -5,7 +5,7 @@ use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
 use near_primitives::types::AccountId;
 use near_primitives::views::{ActionView, ReceiptEnumView};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::ops::Mul;
 use std::str::FromStr;
 
@@ -15,11 +15,13 @@ use std::str::FromStr;
 // Note: we can't look at the attached_deposit, because the function decreases this amount with storage costs (non-constant value)
 
 /// TRANSFER
-// ft_transfer ft_transfer_call ft_resolve_transfer
+// [DONE] ft_transfer
+// ft_transfer_call
+// ft_resolve_transfer
 
 /// BURN
-// near_withdraw
-// with parameter amount
+// [DONE] near_withdraw
+
 pub(crate) async fn store_wrap_near(
     pool: &sqlx::Pool<sqlx::Postgres>,
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
@@ -63,14 +65,19 @@ pub(crate) async fn store_wrap_near(
                     } else if method_name == "near_deposit" {
                         panic!("not implemented yet");
                     } else if method_name == "near_withdraw" {
-                        panic!("not implemented");
+                        events.push(
+                            handle_near_withdraw(
+                                json_rpc_client,
+                                ft_balance_cache,
+                                shard_id,
+                                events.len(),
+                                outcome,
+                                block_header,
+                                args,
+                            )
+                            .await?,
+                        );
                     } else if method_name == "ft_transfer" {
-                        // case without 2fa
-                        // https://explorer.near.org/transactions/EXuc2SVXfvexPxNggo5XdQD9JKABfv9i7LwdUUTX4ySG#3npphttR2J4EmxMrB8NGSu3icjEhaqiWS5vP5FVTTfjJ
-                        // outcome.receipt.predecessor_id is sender
-                        // outcome.receipt.receiver_id is contract id
-                        // args.receiver_id is receiver
-
                         events.extend(
                             handle_ft_transfer(
                                 json_rpc_client,
@@ -95,22 +102,18 @@ pub(crate) async fn store_wrap_near(
     Ok(())
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct FtTransfer {
+// ** TRANSFER **
+
+#[derive(Deserialize, Debug, Clone)]
+struct FtTransfer {
     pub receiver_id: AccountId,
     pub amount: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub memo: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub msg: Option<String>,
 }
 
 // case without 2fa
 // block 68814912, receipt 3npphttR2J4EmxMrB8NGSu3icjEhaqiWS5vP5FVTTfjJ
 // https://explorer.near.org/transactions/EXuc2SVXfvexPxNggo5XdQD9JKABfv9i7LwdUUTX4ySG#3npphttR2J4EmxMrB8NGSu3icjEhaqiWS5vP5FVTTfjJ
-// outcome.receipt.predecessor_id is sender
-// outcome.receipt.receiver_id is contract id
-// args.receiver_id is receiver
 async fn handle_ft_transfer(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     ft_balance_cache: &crate::FtBalanceCache,
@@ -121,14 +124,11 @@ async fn handle_ft_transfer(
     args: &str,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let decoded_args = base64::decode(args)?;
-    // {"amount":"4900000000000000000000000","msg":null,"receiver_id":"spoiler.near"}
     let ft_transfer_args = serde_json::from_slice::<FtTransfer>(&decoded_args)?;
 
     let contract_id = outcome.receipt.receiver_id.clone();
     let sender_id = outcome.receipt.predecessor_id.clone();
     let receiver_id = ft_transfer_args.receiver_id;
-
-    // outcome.receipt.predecessor_id
 
     let sender_delta_amount =
         BigDecimal::from_str(&ft_transfer_args.amount)?.mul(BigDecimal::from(-1));
@@ -231,4 +231,75 @@ async fn handle_ft_transfer(
                 .map(|s| s.escape_default().to_string()),
         },
     ])
+}
+
+// ** BURN **
+
+#[derive(Deserialize, Debug, Clone)]
+struct NearWithdraw {
+    pub amount: String,
+}
+
+// case without 2fa
+// block 68814918, receipt 9nPRqp6vtr7iEDoDnPsinY34msJTTh8GUw4BnYQcW8Gu
+// https://explorer.near.org/transactions/4LP9CZwWZ75vdUyLnnS33TqJCDBg5drwsThm7PCHosWZ#9nPRqp6vtr7iEDoDnPsinY34msJTTh8GUw4BnYQcW8Gu
+async fn handle_near_withdraw(
+    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
+    ft_balance_cache: &crate::FtBalanceCache,
+    shard_id: &near_indexer_primitives::types::ShardId,
+    index: usize,
+    outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
+    block_header: &near_indexer_primitives::views::BlockHeaderView,
+    args: &str,
+) -> anyhow::Result<CoinEvent> {
+    let decoded_args = base64::decode(args)?;
+    let near_withdraw_args = serde_json::from_slice::<NearWithdraw>(&decoded_args)?;
+
+    let contract_id = outcome.receipt.receiver_id.clone();
+    let sender_id = outcome.receipt.predecessor_id.clone();
+    // receiver_id is NULL for BURN event
+
+    let delta_amount = BigDecimal::from_str(&near_withdraw_args.amount)?.mul(BigDecimal::from(-1));
+    let absolute_amount = ft_balance_utils::update_cache_and_get_balance(
+        json_rpc_client,
+        ft_balance_cache,
+        &block_header.prev_hash,
+        contract_id.clone(),
+        &sender_id,
+        &delta_amount,
+    )
+    .await?;
+
+    // I calc it just to check the logic. Should be dropped in the end
+    // actually they could be different if the block contains more than one operations with this account
+    // but it's enough to check at least something
+    let correct_value = ft_balance_utils::get_balance_from_rpc(
+        json_rpc_client,
+        &block_header.hash,
+        contract_id.clone(),
+        sender_id.as_str(),
+    )
+    .await?;
+    assert_eq!(correct_value, absolute_amount.to_string().parse::<u128>()?);
+
+    Ok(CoinEvent {
+        event_index: crate::db_adapters::compose_db_index(
+            block_header.timestamp,
+            shard_id,
+            events::Event::WrapNear,
+            index,
+        )?,
+        receipt_id: outcome.receipt.receipt_id.to_string(),
+        block_timestamp: BigDecimal::from(block_header.timestamp),
+        contract_account_id: contract_id.to_string(),
+        affected_account_id: sender_id.to_string(),
+        involved_account_id: None,
+        delta_amount,
+        absolute_amount,
+        // standard: "".to_string(),
+        // coin_id: "".to_string(),
+        cause: "BURN".to_string(),
+        status: crate::db_adapters::get_status(&outcome.execution_outcome.outcome.status),
+        event_memo: None,
+    })
 }

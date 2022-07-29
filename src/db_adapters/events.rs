@@ -10,7 +10,6 @@ pub(crate) enum Event {
     WrapNear,
 }
 
-// TODO handle overflow in balances (at least it's not done in wrap near)
 pub(crate) async fn store_events(
     pool: &sqlx::Pool<sqlx::Postgres>,
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
@@ -38,8 +37,12 @@ pub(crate) async fn store_events(
         )
     });
 
-    futures::future::try_join_all(events_futures).await.map(|_| ())?;
-    futures::future::try_join_all(legacy_wrap_near_futures).await.map(|_| ())
+    futures::future::try_join_all(events_futures)
+        .await
+        .map(|_| ())?;
+    futures::future::try_join_all(legacy_wrap_near_futures)
+        .await
+        .map(|_| ())
 }
 
 async fn collect_and_store_events(
