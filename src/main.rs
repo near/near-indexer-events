@@ -45,21 +45,10 @@ async fn main() -> anyhow::Result<()> {
     // TODO Error: while executing migrations: error returned from database: 1128 (HY000): Function 'near_indexer.GET_LOCK' is not defined
     // sqlx::migrate!().run(&pool).await?;
 
-    // let start_block_height = match opts.start_block_height {
-    //     Some(x) => x,
-    //     None => models::start_after_interruption(&pool).await?,
-    // };
-
-    // wrap near
-    // ft_transfer 68814912
-    // near_withdraw 68814918
-    // ft_transfer_call 68814941
-    let start_block_height: u64 = 68814941; //60116646; //60116605; //53400020;
-
     let config = near_lake_framework::LakeConfigBuilder::default()
         .s3_bucket_name(opts.s3_bucket_name)
         .s3_region_name(opts.s3_region_name)
-        .start_block_height(start_block_height)
+        .start_block_height(opts.start_block_height)
         .blocks_preload_pool_size(100)
         .build()?;
     init_tracing();
@@ -108,13 +97,13 @@ async fn handle_streamer_message(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     ft_balance_cache: &FtBalanceCache,
 ) -> anyhow::Result<u64> {
-    // if streamer_message.block.header.height % 100 == 0 {
-    eprintln!(
-        "{} / shards {}",
-        streamer_message.block.header.height,
-        streamer_message.shards.len()
-    );
-    // }
+    if streamer_message.block.header.height % 100 == 0 {
+        eprintln!(
+            "{} / shards {}",
+            streamer_message.block.header.height,
+            streamer_message.shards.len()
+        );
+    }
 
     db_adapters::events::store_events(pool, json_rpc_client, &streamer_message, ft_balance_cache)
         .await?;

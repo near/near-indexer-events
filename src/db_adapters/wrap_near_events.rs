@@ -9,18 +9,33 @@ use serde::Deserialize;
 use std::ops::Mul;
 use std::str::FromStr;
 
-/// MINT
-// near_deposit
-// And parse the output logs. It should contain `Deposit {} NEAR to {}`
-// Note: we can't look at the attached_deposit, because the function decreases this amount with storage costs (non-constant value)
+#[derive(Deserialize, Debug, Clone)]
+struct FtTransfer {
+    pub receiver_id: AccountId,
+    pub amount: String,
+    pub memo: Option<String>,
+}
 
-/// TRANSFER
-// [DONE] ft_transfer
-// ft_transfer_call
-// ft_resolve_transfer
+#[derive(Deserialize, Debug, Clone)]
+struct NearWithdraw {
+    pub amount: String,
+}
 
-/// BURN
-// [DONE] near_withdraw
+struct WrapNearBase {
+    pub event_index: BigDecimal,
+    pub receipt_id: String,
+    pub block_timestamp: BigDecimal,
+    pub contract_account_id: AccountId,
+    pub status: String,
+}
+
+struct WrapNearCustom {
+    pub affected_id: AccountId,
+    pub involved_id: Option<AccountId>,
+    pub delta: BigDecimal,
+    pub cause: String,
+    pub memo: Option<String>,
+}
 
 pub(crate) async fn store_wrap_near(
     pool: &sqlx::Pool<sqlx::Postgres>,
@@ -38,62 +53,16 @@ pub(crate) async fn store_wrap_near(
         }
         if let ReceiptEnumView::Action { actions, .. } = &outcome.receipt.receipt {
             for action in actions {
-                if let ActionView::FunctionCall {
-                    method_name,
-                    args,
-                    deposit,
-                    ..
-                } = action
-                {
-                    eprintln!(
-                        "{} {}\n{}",
-                        method_name,
-                        deposit,
-                        &outcome.execution_outcome.outcome.logs.join("\n")
-                    );
-
-                    if let Ok(decoded_args) = base64::decode(args) {
-                        if let Ok(args_json) =
-                            serde_json::from_slice::<serde_json::Value>(&decoded_args)
-                        {
-                            eprintln!("wow args json {}", args_json);
-                        }
-                    }
-
-                    if method_name == "storage_deposit" {
-                        // ignore that
-                    } else if method_name == "near_deposit" {
-                        panic!("not implemented yet");
-                    } else if method_name == "near_withdraw" {
-                        events.push(
-                            handle_near_withdraw(
-                                json_rpc_client,
-                                ft_balance_cache,
-                                shard_id,
-                                events.len(),
-                                outcome,
-                                block_header,
-                                args,
-                            )
-                            .await?,
-                        );
-                    } else if method_name == "ft_transfer" {
-                        events.extend(
-                            handle_ft_transfer(
-                                json_rpc_client,
-                                ft_balance_cache,
-                                shard_id,
-                                events.len(),
-                                outcome,
-                                block_header,
-                                args,
-                            )
-                            .await?,
-                        );
-                    } else {
-                        panic!("new method");
-                    }
-                }
+                process_wrap_near_functions(
+                    &mut events,
+                    json_rpc_client,
+                    shard_id,
+                    block_header,
+                    ft_balance_cache,
+                    action,
+                    outcome,
+                )
+                .await?;
             }
         }
     }
@@ -102,171 +71,212 @@ pub(crate) async fn store_wrap_near(
     Ok(())
 }
 
-// ** TRANSFER **
+async fn process_wrap_near_functions(
+    events: &mut Vec<CoinEvent>,
+    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
+    shard_id: &near_indexer_primitives::types::ShardId,
+    block_header: &near_indexer_primitives::views::BlockHeaderView,
+    cache: &crate::FtBalanceCache,
+    action: &ActionView,
+    outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
+) -> anyhow::Result<()> {
+    let (method_name, args, deposit) = match action {
+        ActionView::FunctionCall {
+            method_name,
+            args,
+            deposit,
+            ..
+        } => (method_name, args, deposit),
+        _ => return Ok(()),
+    };
 
-#[derive(Deserialize, Debug, Clone)]
-struct FtTransfer {
-    pub receiver_id: AccountId,
-    pub amount: String,
-    pub memo: Option<String>,
+    if method_name == "storage_deposit" {
+        return Ok(());
+    }
+
+    let decoded_args = base64::decode(args)?;
+
+    eprintln!(
+        "{} {} {}\n{}",
+        block_header.height,
+        method_name,
+        deposit,
+        &outcome.execution_outcome.outcome.logs.join("\n")
+    );
+
+    if let Ok(args_json) = serde_json::from_slice::<serde_json::Value>(&decoded_args) {
+        eprintln!("args json {}", args_json);
+    }
+
+    if method_name == "near_deposit" {
+        // block 68814971, receipt 2g7EpDnSBNAv9iLeQX31DvJ3RedPteTPSoWT5PvdSbA6
+        // https://explorer.near.org/transactions/A8VxiibuqVwvK6KqKkSqfRCsFVzw2Fe53Cyh744bMbYE#2g7EpDnSBNAv9iLeQX31DvJ3RedPteTPSoWT5PvdSbA6
+        let delta = BigDecimal::from_str(&deposit.to_string())?;
+        let base = get_base(shard_id, events.len(), outcome, block_header)?;
+        let custom = WrapNearCustom {
+            affected_id: outcome.receipt.predecessor_id.clone(),
+            involved_id: None,
+            delta,
+            cause: "MINT".to_string(),
+            memo: None,
+        };
+        events.push(build_event(json_rpc_client, cache, block_header, base, custom).await?);
+        return Ok(());
+    }
+
+    if method_name == "ft_transfer" || method_name == "ft_transfer_call" {
+        // ft_transfer
+        // block 68814912, receipt 3npphttR2J4EmxMrB8NGSu3icjEhaqiWS5vP5FVTTfjJ
+        // https://explorer.near.org/transactions/EXuc2SVXfvexPxNggo5XdQD9JKABfv9i7LwdUUTX4ySG#3npphttR2J4EmxMrB8NGSu3icjEhaqiWS5vP5FVTTfjJ
+
+        // ft_transfer_call
+        // block 68814941, receipt Huxfk2oVoPeWWKHgRgMY5VdJ1Cjec3HKGFhrRYMdrn2h
+        // https://explorer.near.org/transactions/zVVciak15t3UcqjqmJzgvYVfPCMYEmbthQFnCeHzEtP#Huxfk2oVoPeWWKHgRgMY5VdJ1Cjec3HKGFhrRYMdrn2h
+        let ft_transfer_args = serde_json::from_slice::<FtTransfer>(&decoded_args)?;
+        let delta = BigDecimal::from_str(&ft_transfer_args.amount)?;
+        let negative_delta = delta.clone().mul(BigDecimal::from(-1));
+        let memo = ft_transfer_args
+            .memo
+            .as_ref()
+            .map(|s| s.escape_default().to_string());
+
+        let base = get_base(shard_id, events.len(), outcome, block_header)?;
+        let custom = WrapNearCustom {
+            affected_id: outcome.receipt.predecessor_id.clone(),
+            involved_id: Some(ft_transfer_args.receiver_id.clone()),
+            delta: negative_delta,
+            cause: "TRANSFER".to_string(),
+            memo: memo.clone(),
+        };
+        events.push(build_event(json_rpc_client, cache, block_header, base, custom).await?);
+
+        let base = get_base(shard_id, events.len(), outcome, block_header)?;
+        let custom = WrapNearCustom {
+            affected_id: ft_transfer_args.receiver_id,
+            involved_id: Some(outcome.receipt.predecessor_id.clone()),
+            delta,
+            cause: "TRANSFER".to_string(),
+            memo,
+        };
+        events.push(build_event(json_rpc_client, cache, block_header, base, custom).await?);
+        return Ok(());
+    }
+
+    if method_name == "ft_resolve_transfer" {
+        if outcome.execution_outcome.outcome.logs.is_empty() {
+            // ft_transfer_call was successful, there's nothing to return back
+            return Ok(());
+        }
+        let ft_transfer_args = serde_json::from_slice::<FtTransfer>(&decoded_args)?;
+        let delta = BigDecimal::from_str(&ft_transfer_args.amount)?;
+        let negative_delta = delta.clone().mul(BigDecimal::from(-1));
+        let memo = ft_transfer_args
+            .memo
+            .as_ref()
+            .map(|s| s.escape_default().to_string());
+
+        for log in &outcome.execution_outcome.outcome.logs {
+            if log == "The account of the sender was deleted" {
+                panic!("The account of the sender was deleted: I really want to re-check it manually. Block {}", block_header.height);
+                // we should revert ft_transfer_call, but there's no receiver_id. We should burn tokens
+                let base = get_base(shard_id, events.len(), outcome, block_header)?;
+                let custom = WrapNearCustom {
+                    affected_id: ft_transfer_args.receiver_id,
+                    involved_id: None,
+                    delta: negative_delta,
+                    cause: "BURN".to_string(),
+                    memo,
+                };
+                events.push(build_event(json_rpc_client, cache, block_header, base, custom).await?);
+                return Ok(());
+            }
+            if log.starts_with("Refund ") {
+                panic!(
+                    "Refund: I really want to re-check it manually. Block {}",
+                    block_header.height
+                );
+                // we should revert ft_transfer_call
+
+                let base = get_base(shard_id, events.len(), outcome, block_header)?;
+                let custom = WrapNearCustom {
+                    affected_id: ft_transfer_args.receiver_id.clone(),
+                    involved_id: Some(outcome.receipt.predecessor_id.clone()),
+                    delta: negative_delta,
+                    cause: "TRANSFER".to_string(),
+                    memo: memo.clone(),
+                };
+                events.push(build_event(json_rpc_client, cache, block_header, base, custom).await?);
+
+                let base = get_base(shard_id, events.len(), outcome, block_header)?;
+                let custom = WrapNearCustom {
+                    affected_id: outcome.receipt.predecessor_id.clone(),
+                    involved_id: Some(ft_transfer_args.receiver_id),
+                    delta,
+                    cause: "TRANSFER".to_string(),
+                    memo,
+                };
+                events.push(build_event(json_rpc_client, cache, block_header, base, custom).await?);
+                return Ok(());
+            }
+        }
+        return Ok(());
+    }
+
+    if method_name == "near_withdraw" {
+        // block 68814918, receipt 9nPRqp6vtr7iEDoDnPsinY34msJTTh8GUw4BnYQcW8Gu
+        // https://explorer.near.org/transactions/4LP9CZwWZ75vdUyLnnS33TqJCDBg5drwsThm7PCHosWZ#9nPRqp6vtr7iEDoDnPsinY34msJTTh8GUw4BnYQcW8Gu
+        let ft_burn_args = serde_json::from_slice::<NearWithdraw>(&decoded_args)?;
+        let negative_delta = BigDecimal::from_str(&ft_burn_args.amount)?.mul(BigDecimal::from(-1));
+
+        let base = get_base(shard_id, events.len(), outcome, block_header)?;
+        let custom = WrapNearCustom {
+            affected_id: outcome.receipt.predecessor_id.clone(),
+            involved_id: None,
+            delta: negative_delta,
+            cause: "BURN".to_string(),
+            memo: None,
+        };
+        events.push(build_event(json_rpc_client, cache, block_header, base, custom).await?);
+        return Ok(());
+    }
+
+    panic!("new method {}", method_name);
 }
 
-// case without 2fa
-// block 68814912, receipt 3npphttR2J4EmxMrB8NGSu3icjEhaqiWS5vP5FVTTfjJ
-// https://explorer.near.org/transactions/EXuc2SVXfvexPxNggo5XdQD9JKABfv9i7LwdUUTX4ySG#3npphttR2J4EmxMrB8NGSu3icjEhaqiWS5vP5FVTTfjJ
-async fn handle_ft_transfer(
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
-    ft_balance_cache: &crate::FtBalanceCache,
+fn get_base(
     shard_id: &near_indexer_primitives::types::ShardId,
     starting_index: usize,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    args: &str,
-) -> anyhow::Result<Vec<CoinEvent>> {
-    let decoded_args = base64::decode(args)?;
-    let ft_transfer_args = serde_json::from_slice::<FtTransfer>(&decoded_args)?;
-
-    let contract_id = outcome.receipt.receiver_id.clone();
-    let sender_id = outcome.receipt.predecessor_id.clone();
-    let receiver_id = ft_transfer_args.receiver_id;
-
-    let sender_delta_amount =
-        BigDecimal::from_str(&ft_transfer_args.amount)?.mul(BigDecimal::from(-1));
-    let sender_absolute_amount = ft_balance_utils::update_cache_and_get_balance(
-        json_rpc_client,
-        ft_balance_cache,
-        &block_header.prev_hash,
-        contract_id.clone(),
-        &sender_id,
-        &sender_delta_amount,
-    )
-    .await?;
-
-    // I calc it just to check the logic. Should be dropped in the end
-    // actually they could be different if the block contains more than one operations with this account
-    // but it's enough to check at least something
-    let correct_sender_value = ft_balance_utils::get_balance_from_rpc(
-        json_rpc_client,
-        &block_header.hash,
-        contract_id.clone(),
-        sender_id.as_str(),
-    )
-    .await?;
-    assert_eq!(
-        correct_sender_value,
-        sender_absolute_amount.to_string().parse::<u128>()?
-    );
-
-    let receiver_delta_amount = BigDecimal::from_str(&ft_transfer_args.amount)?;
-    let receiver_absolute_amount = ft_balance_utils::update_cache_and_get_balance(
-        json_rpc_client,
-        ft_balance_cache,
-        &block_header.prev_hash,
-        contract_id.clone(),
-        &receiver_id,
-        &receiver_delta_amount,
-    )
-    .await?;
-
-    // I calc it just to check the logic. Should be dropped in the end
-    // actually they could be different if the block contains more than one operations with this account
-    // but it's enough to check at least something
-    let correct_receiver_value = ft_balance_utils::get_balance_from_rpc(
-        json_rpc_client,
-        &block_header.hash,
-        contract_id.clone(),
-        receiver_id.as_str(),
-    )
-    .await?;
-    assert_eq!(
-        correct_receiver_value,
-        receiver_absolute_amount.to_string().parse::<u128>()?
-    );
-
-    Ok(vec![
-        CoinEvent {
-            event_index: crate::db_adapters::compose_db_index(
-                block_header.timestamp,
-                shard_id,
-                events::Event::WrapNear,
-                starting_index,
-            )?,
-            receipt_id: outcome.receipt.receipt_id.to_string(),
-            block_timestamp: BigDecimal::from(block_header.timestamp),
-            contract_account_id: contract_id.to_string(),
-            affected_account_id: sender_id.to_string(),
-            involved_account_id: Some(receiver_id.to_string()),
-            delta_amount: sender_delta_amount,
-            absolute_amount: sender_absolute_amount,
-            // standard: "".to_string(),
-            // coin_id: "".to_string(),
-            cause: "TRANSFER".to_string(),
-            status: crate::db_adapters::get_status(&outcome.execution_outcome.outcome.status),
-            event_memo: ft_transfer_args
-                .memo
-                .as_ref()
-                .map(|s| s.escape_default().to_string()),
-        },
-        CoinEvent {
-            event_index: crate::db_adapters::compose_db_index(
-                block_header.timestamp,
-                shard_id,
-                events::Event::WrapNear,
-                starting_index + 1,
-            )?,
-            receipt_id: outcome.receipt.receipt_id.to_string(),
-            block_timestamp: BigDecimal::from(block_header.timestamp),
-            contract_account_id: contract_id.to_string(),
-            affected_account_id: receiver_id.to_string(),
-            involved_account_id: Some(sender_id.to_string()),
-            delta_amount: receiver_delta_amount,
-            absolute_amount: receiver_absolute_amount,
-            // standard: "".to_string(),
-            // coin_id: "".to_string(),
-            cause: "TRANSFER".to_string(),
-            status: crate::db_adapters::get_status(&outcome.execution_outcome.outcome.status),
-            event_memo: ft_transfer_args
-                .memo
-                .as_ref()
-                .map(|s| s.escape_default().to_string()),
-        },
-    ])
+) -> anyhow::Result<WrapNearBase> {
+    Ok(WrapNearBase {
+        event_index: crate::db_adapters::compose_db_index(
+            block_header.timestamp,
+            shard_id,
+            events::Event::WrapNear,
+            starting_index,
+        )?,
+        receipt_id: outcome.receipt.receipt_id.to_string(),
+        block_timestamp: BigDecimal::from(block_header.timestamp),
+        contract_account_id: AccountId::from_str("wrap.near")?,
+        status: crate::db_adapters::get_status(&outcome.execution_outcome.outcome.status),
+    })
 }
 
-// ** BURN **
-
-#[derive(Deserialize, Debug, Clone)]
-struct NearWithdraw {
-    pub amount: String,
-}
-
-// case without 2fa
-// block 68814918, receipt 9nPRqp6vtr7iEDoDnPsinY34msJTTh8GUw4BnYQcW8Gu
-// https://explorer.near.org/transactions/4LP9CZwWZ75vdUyLnnS33TqJCDBg5drwsThm7PCHosWZ#9nPRqp6vtr7iEDoDnPsinY34msJTTh8GUw4BnYQcW8Gu
-async fn handle_near_withdraw(
+async fn build_event(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     ft_balance_cache: &crate::FtBalanceCache,
-    shard_id: &near_indexer_primitives::types::ShardId,
-    index: usize,
-    outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    args: &str,
+    base: WrapNearBase,
+    custom: WrapNearCustom,
 ) -> anyhow::Result<CoinEvent> {
-    let decoded_args = base64::decode(args)?;
-    let near_withdraw_args = serde_json::from_slice::<NearWithdraw>(&decoded_args)?;
-
-    let contract_id = outcome.receipt.receiver_id.clone();
-    let sender_id = outcome.receipt.predecessor_id.clone();
-    // receiver_id is NULL for BURN event
-
-    let delta_amount = BigDecimal::from_str(&near_withdraw_args.amount)?.mul(BigDecimal::from(-1));
     let absolute_amount = ft_balance_utils::update_cache_and_get_balance(
         json_rpc_client,
         ft_balance_cache,
         &block_header.prev_hash,
-        contract_id.clone(),
-        &sender_id,
-        &delta_amount,
+        base.contract_account_id.clone(),
+        &custom.affected_id,
+        &custom.delta,
     )
     .await?;
 
@@ -276,30 +286,31 @@ async fn handle_near_withdraw(
     let correct_value = ft_balance_utils::get_balance_from_rpc(
         json_rpc_client,
         &block_header.hash,
-        contract_id.clone(),
-        sender_id.as_str(),
+        base.contract_account_id.clone(),
+        custom.affected_id.as_str(),
     )
     .await?;
-    assert_eq!(correct_value, absolute_amount.to_string().parse::<u128>()?);
+    if correct_value != absolute_amount.to_string().parse::<u128>()? {
+        eprintln!(
+            "ERROR could be here, different amounts\n{}\n{}",
+            correct_value,
+            absolute_amount.to_string().parse::<u128>()?
+        );
+    }
 
     Ok(CoinEvent {
-        event_index: crate::db_adapters::compose_db_index(
-            block_header.timestamp,
-            shard_id,
-            events::Event::WrapNear,
-            index,
-        )?,
-        receipt_id: outcome.receipt.receipt_id.to_string(),
-        block_timestamp: BigDecimal::from(block_header.timestamp),
-        contract_account_id: contract_id.to_string(),
-        affected_account_id: sender_id.to_string(),
-        involved_account_id: None,
-        delta_amount,
+        event_index: base.event_index,
+        receipt_id: base.receipt_id,
+        block_timestamp: base.block_timestamp,
+        contract_account_id: base.contract_account_id.to_string(),
+        affected_account_id: custom.affected_id.to_string(),
+        involved_account_id: custom.involved_id.map(|id| id.to_string()),
+        delta_amount: custom.delta,
         absolute_amount,
         // standard: "".to_string(),
         // coin_id: "".to_string(),
-        cause: "BURN".to_string(),
-        status: crate::db_adapters::get_status(&outcome.execution_outcome.outcome.status),
-        event_memo: None,
+        cause: custom.cause,
+        status: base.status,
+        event_memo: custom.memo,
     })
 }
