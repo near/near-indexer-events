@@ -1,3 +1,4 @@
+use std::fs::OpenOptions;
 use crate::db_adapters::{events, ft_balance_utils};
 use crate::models;
 use crate::models::coin_events::CoinEvent;
@@ -8,6 +9,7 @@ use near_primitives::views::{ActionView, ReceiptEnumView};
 use serde::Deserialize;
 use std::ops::Mul;
 use std::str::FromStr;
+use std::io::Write;
 
 #[derive(Deserialize, Debug, Clone)]
 struct FtTransfer {
@@ -177,7 +179,15 @@ async fn process_wrap_near_functions(
 
         for log in &outcome.execution_outcome.outcome.logs {
             if log == "The account of the sender was deleted" {
-                panic!("The account of the sender was deleted: I really want to re-check it manually. Block {}", block_header.height);
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .open("log.txt")
+                    .unwrap();
+
+                writeln!(file, "The account of the sender was deleted {}", block_header.height)?;
+
+
                 // we should revert ft_transfer_call, but there's no receiver_id. We should burn tokens
                 let base = get_base(shard_id, events.len(), outcome, block_header)?;
                 let custom = WrapNearCustom {
@@ -191,10 +201,15 @@ async fn process_wrap_near_functions(
                 return Ok(());
             }
             if log.starts_with("Refund ") {
-                panic!(
-                    "Refund: I really want to re-check it manually. Block {}",
-                    block_header.height
-                );
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .open("log.txt")
+                    .unwrap();
+
+                writeln!(file, "Refund {}", block_header.height)?;
+
+
                 // we should revert ft_transfer_call
 
                 let base = get_base(shard_id, events.len(), outcome, block_header)?;
@@ -240,7 +255,14 @@ async fn process_wrap_near_functions(
         return Ok(());
     }
 
-    panic!("new method {}", method_name);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("log.txt")
+        .unwrap();
+
+    writeln!(file, "{} {}", block_header.height, method_name)?;
+    Ok(())
 }
 
 fn get_base(

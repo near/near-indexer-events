@@ -31,6 +31,8 @@ pub struct AccountWithContract {
 pub type FtBalanceCache =
     std::sync::Arc<Mutex<SizedCache<AccountWithContract, near_primitives::types::Balance>>>;
 
+// wrap near created at block 29998008
+// --s3-bucket-name near-lake-data-mainnet --s3-region-name eu-central-1 --near-archival-rpc-url https://archival-rpc.mainnet.near.org --start-block-height 29998000
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
