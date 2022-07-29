@@ -5,7 +5,9 @@ use std::str::FromStr;
 mod coin_events;
 mod event_types;
 pub(crate) mod events;
+mod ft_balance_utils;
 mod nft_events;
+mod wrap_near_events;
 
 pub(crate) const CHUNK_SIZE_FOR_BATCH_INSERT: usize = 100;
 pub(crate) const RETRY_COUNT: usize = 10;
@@ -35,6 +37,7 @@ fn compose_db_index(
     let event_type_index: u128 = match event {
         events::Event::Nep141 => 1,
         events::Event::Nep171 => 2,
+        events::Event::WrapNear => 3,
     };
     let db_index: u128 = timestamp_millis * 100_000_000_000 * 100_000_000_000
         + (*shard_id as u128) * 10_000_000

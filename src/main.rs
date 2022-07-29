@@ -49,7 +49,11 @@ async fn main() -> anyhow::Result<()> {
     //     Some(x) => x,
     //     None => models::start_after_interruption(&pool).await?,
     // };
-    let start_block_height: u64 = 60116646; //60116605; //53400020;
+
+    // wrap near
+    // ft_transfer 68814912
+    // near_withdraw 68814918
+    let start_block_height: u64 = 68814912; // 68814906 ; //60116646; //60116605; //53400020;
 
     let config = near_lake_framework::LakeConfigBuilder::default()
         .s3_bucket_name(opts.s3_bucket_name)
