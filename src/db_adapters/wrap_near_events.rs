@@ -1,15 +1,15 @@
-use std::fs::OpenOptions;
 use crate::db_adapters::{events, ft_balance_utils};
 use crate::models;
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
 use near_primitives::types::AccountId;
-use near_primitives::views::{ActionView, ReceiptEnumView};
+use near_primitives::views::{ActionView, ExecutionStatusView, ReceiptEnumView};
 use serde::Deserialize;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::ops::Mul;
 use std::str::FromStr;
-use std::io::Write;
 
 #[derive(Deserialize, Debug, Clone)]
 struct FtTransfer {
@@ -28,7 +28,7 @@ struct WrapNearBase {
     pub receipt_id: String,
     pub block_timestamp: BigDecimal,
     pub contract_account_id: AccountId,
-    pub status: String,
+    pub status: ExecutionStatusView,
 }
 
 struct WrapNearCustom {
@@ -185,8 +185,11 @@ async fn process_wrap_near_functions(
                     .open("log.txt")
                     .unwrap();
 
-                writeln!(file, "The account of the sender was deleted {}", block_header.height)?;
-
+                writeln!(
+                    file,
+                    "The account of the sender was deleted {}",
+                    block_header.height
+                )?;
 
                 // we should revert ft_transfer_call, but there's no receiver_id. We should burn tokens
                 let base = get_base(shard_id, events.len(), outcome, block_header)?;
@@ -208,7 +211,6 @@ async fn process_wrap_near_functions(
                     .unwrap();
 
                 writeln!(file, "Refund {}", block_header.height)?;
-
 
                 // we should revert ft_transfer_call
 
@@ -281,7 +283,7 @@ fn get_base(
         receipt_id: outcome.receipt.receipt_id.to_string(),
         block_timestamp: BigDecimal::from(block_header.timestamp),
         contract_account_id: AccountId::from_str("wrap.near")?,
-        status: crate::db_adapters::get_status(&outcome.execution_outcome.outcome.status),
+        status: outcome.execution_outcome.outcome.status.clone(),
     })
 }
 
@@ -295,6 +297,7 @@ async fn build_event(
     let absolute_amount = ft_balance_utils::update_cache_and_get_balance(
         json_rpc_client,
         ft_balance_cache,
+        &base.status,
         &block_header.prev_hash,
         base.contract_account_id.clone(),
         &custom.affected_id,
@@ -332,7 +335,7 @@ async fn build_event(
         // standard: "".to_string(),
         // coin_id: "".to_string(),
         cause: custom.cause,
-        status: base.status,
+        status: crate::db_adapters::get_status(&base.status),
         event_memo: custom.memo,
     })
 }

@@ -57,6 +57,7 @@ async fn compose_ft_db_events(
                     let absolute_amount = ft_balance_utils::update_cache_and_get_balance(
                         json_rpc_client,
                         ft_balance_cache,
+                        &outcome.execution_outcome.outcome.status,
                         &block_header.prev_hash,
                         contract_id.clone(),
                         &mint_event.owner_id,
@@ -95,6 +96,7 @@ async fn compose_ft_db_events(
                     let absolute_amount = ft_balance_utils::update_cache_and_get_balance(
                         json_rpc_client,
                         ft_balance_cache,
+                        &outcome.execution_outcome.outcome.status,
                         &block_header.prev_hash,
                         contract_id.clone(),
                         &transfer_event.old_owner_id,
@@ -134,6 +136,7 @@ async fn compose_ft_db_events(
                     let absolute_amount = ft_balance_utils::update_cache_and_get_balance(
                         json_rpc_client,
                         ft_balance_cache,
+                        &outcome.execution_outcome.outcome.status,
                         &block_header.prev_hash,
                         contract_id.clone(),
                         &transfer_event.new_owner_id,
@@ -177,6 +180,7 @@ async fn compose_ft_db_events(
                     let absolute_amount = ft_balance_utils::update_cache_and_get_balance(
                         json_rpc_client,
                         ft_balance_cache,
+                        &outcome.execution_outcome.outcome.status,
                         &block_header.prev_hash,
                         contract_id.clone(),
                         &burn_event.owner_id,

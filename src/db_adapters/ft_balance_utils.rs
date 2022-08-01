@@ -1,6 +1,7 @@
 use bigdecimal::BigDecimal;
 use cached::Cached;
 use near_lake_framework::near_indexer_primitives;
+use near_primitives::views::ExecutionStatusView;
 use num_traits::Signed;
 use std::ops::Add;
 use std::str::FromStr;
@@ -8,6 +9,7 @@ use std::str::FromStr;
 pub(crate) async fn update_cache_and_get_balance(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     ft_balance_cache: &crate::FtBalanceCache,
+    execution_status: &ExecutionStatusView,
     prev_block_hash: &near_indexer_primitives::CryptoHash,
     contract_id: near_primitives::types::AccountId,
     account_id: &str,
@@ -27,7 +29,12 @@ pub(crate) async fn update_cache_and_get_balance(
         .await?
         .to_string(),
     )?;
-    let absolute_amount = prev_absolute_amount.add(delta_amount);
+    let absolute_amount = match execution_status {
+        ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => prev_absolute_amount,
+        ExecutionStatusView::SuccessValue(_) | ExecutionStatusView::SuccessReceiptId(_) => {
+            prev_absolute_amount.add(delta_amount)
+        }
+    };
 
     if absolute_amount.is_negative() {
         anyhow::bail!(
