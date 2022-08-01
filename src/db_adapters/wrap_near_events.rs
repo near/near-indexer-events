@@ -19,6 +19,14 @@ struct FtTransfer {
 }
 
 #[derive(Deserialize, Debug, Clone)]
+struct FtRefund {
+    pub receiver_id: AccountId,
+    pub sender_id: AccountId,
+    pub amount: String,
+    pub memo: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
 struct NearWithdraw {
     pub amount: String,
 }
@@ -169,10 +177,10 @@ async fn process_wrap_near_functions(
             // ft_transfer_call was successful, there's nothing to return back
             return Ok(());
         }
-        let ft_transfer_args = serde_json::from_slice::<FtTransfer>(&decoded_args)?;
-        let delta = BigDecimal::from_str(&ft_transfer_args.amount)?;
+        let ft_refund_args = serde_json::from_slice::<FtRefund>(&decoded_args)?;
+        let delta = BigDecimal::from_str(&ft_refund_args.amount)?;
         let negative_delta = delta.clone().mul(BigDecimal::from(-1));
-        let memo = ft_transfer_args
+        let memo = ft_refund_args
             .memo
             .as_ref()
             .map(|s| s.escape_default().to_string());
@@ -194,7 +202,7 @@ async fn process_wrap_near_functions(
                 // we should revert ft_transfer_call, but there's no receiver_id. We should burn tokens
                 let base = get_base(shard_id, events.len(), outcome, block_header)?;
                 let custom = WrapNearCustom {
-                    affected_id: ft_transfer_args.receiver_id,
+                    affected_id: ft_refund_args.receiver_id,
                     involved_id: None,
                     delta: negative_delta,
                     cause: "BURN".to_string(),
@@ -204,20 +212,11 @@ async fn process_wrap_near_functions(
                 return Ok(());
             }
             if log.starts_with("Refund ") {
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .append(true)
-                    .open("log.txt")
-                    .unwrap();
-
-                writeln!(file, "Refund {}", block_header.height)?;
-
                 // we should revert ft_transfer_call
-
                 let base = get_base(shard_id, events.len(), outcome, block_header)?;
                 let custom = WrapNearCustom {
-                    affected_id: ft_transfer_args.receiver_id.clone(),
-                    involved_id: Some(outcome.receipt.predecessor_id.clone()),
+                    affected_id: ft_refund_args.receiver_id.clone(),
+                    involved_id: Some(ft_refund_args.sender_id.clone()),
                     delta: negative_delta,
                     cause: "TRANSFER".to_string(),
                     memo: memo.clone(),
@@ -226,8 +225,8 @@ async fn process_wrap_near_functions(
 
                 let base = get_base(shard_id, events.len(), outcome, block_header)?;
                 let custom = WrapNearCustom {
-                    affected_id: outcome.receipt.predecessor_id.clone(),
-                    involved_id: Some(ft_transfer_args.receiver_id),
+                    affected_id: ft_refund_args.sender_id,
+                    involved_id: Some(ft_refund_args.receiver_id),
                     delta,
                     cause: "TRANSFER".to_string(),
                     memo,
@@ -321,6 +320,22 @@ async fn build_event(
             correct_value,
             absolute_amount.to_string().parse::<u128>()?
         );
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open("log.txt")
+            .unwrap();
+
+        writeln!(
+            file,
+            "{} {} different amounts for {} {} {}",
+            block_header.height,
+            block_header.hash,
+            custom.affected_id.as_str(),
+            correct_value,
+            absolute_amount.to_string().parse::<u128>()?
+        )?;
     }
 
     Ok(CoinEvent {
