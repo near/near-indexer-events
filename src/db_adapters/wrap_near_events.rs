@@ -100,10 +100,6 @@ async fn process_wrap_near_functions(
         _ => return Ok(()),
     };
 
-    if method_name == "storage_deposit" {
-        return Ok(());
-    }
-
     let decoded_args = base64::decode(args)?;
 
     eprintln!(
@@ -113,11 +109,11 @@ async fn process_wrap_near_functions(
         deposit,
         &outcome.execution_outcome.outcome.logs.join("\n")
     );
-
     if let Ok(args_json) = serde_json::from_slice::<serde_json::Value>(&decoded_args) {
         eprintln!("args json {}", args_json);
     }
 
+    // MINT produces 1 event, where involved_account_id is NULL
     if method_name == "near_deposit" {
         // block 68814971, receipt 2g7EpDnSBNAv9iLeQX31DvJ3RedPteTPSoWT5PvdSbA6
         // https://explorer.near.org/transactions/A8VxiibuqVwvK6KqKkSqfRCsFVzw2Fe53Cyh744bMbYE#2g7EpDnSBNAv9iLeQX31DvJ3RedPteTPSoWT5PvdSbA6
@@ -134,6 +130,9 @@ async fn process_wrap_near_functions(
         return Ok(());
     }
 
+    // TRANSFER produces 2 events
+    // 1. affected_account_id is sender, delta is negative, absolute_amount decreased
+    // 2. affected_account_id is receiver, delta is positive, absolute_amount increased
     if method_name == "ft_transfer" || method_name == "ft_transfer_call" {
         // ft_transfer
         // block 68814912, receipt 3npphttR2J4EmxMrB8NGSu3icjEhaqiWS5vP5FVTTfjJ
@@ -142,7 +141,20 @@ async fn process_wrap_near_functions(
         // ft_transfer_call
         // block 68814941, receipt Huxfk2oVoPeWWKHgRgMY5VdJ1Cjec3HKGFhrRYMdrn2h
         // https://explorer.near.org/transactions/zVVciak15t3UcqjqmJzgvYVfPCMYEmbthQFnCeHzEtP#Huxfk2oVoPeWWKHgRgMY5VdJ1Cjec3HKGFhrRYMdrn2h
-        let ft_transfer_args = serde_json::from_slice::<FtTransfer>(&decoded_args)?;
+        let ft_transfer_args = match serde_json::from_slice::<FtTransfer>(&decoded_args) {
+            Ok(x) => x,
+            Err(err) => {
+                match outcome.execution_outcome.outcome.status {
+                    // We couldn't parse args for failed receipt. Let's just ignore it, we can't save it properly
+                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => return Ok(()),
+                    ExecutionStatusView::SuccessValue(_)
+                    | ExecutionStatusView::SuccessReceiptId(_) => {
+                        anyhow::bail!(err)
+                    }
+                }
+            }
+        };
+
         let delta = BigDecimal::from_str(&ft_transfer_args.amount)?;
         let negative_delta = delta.clone().mul(BigDecimal::from(-1));
         let memo = ft_transfer_args
@@ -172,12 +184,25 @@ async fn process_wrap_near_functions(
         return Ok(());
     }
 
+    // If TRANSFER failed, it could be revoked. The procedure is the same as for TRANSFER
     if method_name == "ft_resolve_transfer" {
         if outcome.execution_outcome.outcome.logs.is_empty() {
             // ft_transfer_call was successful, there's nothing to return back
             return Ok(());
         }
-        let ft_refund_args = serde_json::from_slice::<FtRefund>(&decoded_args)?;
+        let ft_refund_args = match serde_json::from_slice::<FtRefund>(&decoded_args) {
+            Ok(x) => x,
+            Err(err) => {
+                match outcome.execution_outcome.outcome.status {
+                    // We couldn't parse args for failed receipt. Let's just ignore it, we can't save it properly
+                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => return Ok(()),
+                    ExecutionStatusView::SuccessValue(_)
+                    | ExecutionStatusView::SuccessReceiptId(_) => {
+                        anyhow::bail!(err)
+                    }
+                }
+            }
+        };
         let delta = BigDecimal::from_str(&ft_refund_args.amount)?;
         let negative_delta = delta.clone().mul(BigDecimal::from(-1));
         let memo = ft_refund_args
@@ -238,10 +263,23 @@ async fn process_wrap_near_functions(
         return Ok(());
     }
 
+    // BURN produces 1 event, where involved_account_id is NULL
     if method_name == "near_withdraw" {
         // block 68814918, receipt 9nPRqp6vtr7iEDoDnPsinY34msJTTh8GUw4BnYQcW8Gu
         // https://explorer.near.org/transactions/4LP9CZwWZ75vdUyLnnS33TqJCDBg5drwsThm7PCHosWZ#9nPRqp6vtr7iEDoDnPsinY34msJTTh8GUw4BnYQcW8Gu
-        let ft_burn_args = serde_json::from_slice::<NearWithdraw>(&decoded_args)?;
+        let ft_burn_args = match serde_json::from_slice::<NearWithdraw>(&decoded_args) {
+            Ok(x) => x,
+            Err(err) => {
+                match outcome.execution_outcome.outcome.status {
+                    // We couldn't parse args for failed receipt. Let's just ignore it, we can't save it properly
+                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => return Ok(()),
+                    ExecutionStatusView::SuccessValue(_)
+                    | ExecutionStatusView::SuccessReceiptId(_) => {
+                        anyhow::bail!(err)
+                    }
+                }
+            }
+        };
         let negative_delta = BigDecimal::from_str(&ft_burn_args.amount)?.mul(BigDecimal::from(-1));
 
         let base = get_base(shard_id, events.len(), outcome, block_header)?;
