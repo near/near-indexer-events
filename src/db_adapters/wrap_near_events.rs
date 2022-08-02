@@ -6,8 +6,6 @@ use near_lake_framework::near_indexer_primitives;
 use near_primitives::types::AccountId;
 use near_primitives::views::{ActionView, ExecutionStatusView, ReceiptEnumView};
 use serde::Deserialize;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::ops::Mul;
 use std::str::FromStr;
 
@@ -102,15 +100,8 @@ async fn process_wrap_near_functions(
 
     let decoded_args = base64::decode(args)?;
 
-    eprintln!(
-        "{} {} {}\n{}",
-        block_header.height,
-        method_name,
-        deposit,
-        &outcome.execution_outcome.outcome.logs.join("\n")
-    );
-    if let Ok(args_json) = serde_json::from_slice::<serde_json::Value>(&decoded_args) {
-        eprintln!("args json {}", args_json);
+    if method_name == "storage_deposit" {
+        return Ok(());
     }
 
     // MINT produces 1 event, where involved_account_id is NULL
@@ -212,17 +203,12 @@ async fn process_wrap_near_functions(
 
         for log in &outcome.execution_outcome.outcome.logs {
             if log == "The account of the sender was deleted" {
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .append(true)
-                    .open("log.txt")
-                    .unwrap();
-
-                writeln!(
-                    file,
+                // I never met this case so it's better to re-check it manually when we find it
+                tracing::error!(
+                    target: crate::INDEXER,
                     "The account of the sender was deleted {}",
                     block_header.height
-                )?;
+                );
 
                 // we should revert ft_transfer_call, but there's no receiver_id. We should burn tokens
                 let base = get_base(shard_id, events.len(), outcome, block_header)?;
@@ -294,13 +280,12 @@ async fn process_wrap_near_functions(
         return Ok(());
     }
 
-    let mut file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open("log.txt")
-        .unwrap();
-
-    writeln!(file, "{} {}", block_header.height, method_name)?;
+    tracing::error!(
+        target: crate::INDEXER,
+        "{} method {}",
+        block_header.height,
+        method_name
+    );
     Ok(())
 }
 
@@ -353,27 +338,15 @@ async fn build_event(
     )
     .await?;
     if correct_value != absolute_amount.to_string().parse::<u128>()? {
-        eprintln!(
-            "ERROR could be here, different amounts\n{}\n{}",
-            correct_value,
-            absolute_amount.to_string().parse::<u128>()?
-        );
-
-        let mut file = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open("log.txt")
-            .unwrap();
-
-        writeln!(
-            file,
-            "{} {} different amounts for {} {} {}",
+        tracing::error!(
+            target: crate::INDEXER,
+            "{} different amounts for {}: expected {}, actual {}. Index {}",
             block_header.height,
-            block_header.hash,
             custom.affected_id.as_str(),
             correct_value,
-            absolute_amount.to_string().parse::<u128>()?
-        )?;
+            absolute_amount.to_string().parse::<u128>()?,
+            base.event_index,
+        );
     }
 
     Ok(CoinEvent {

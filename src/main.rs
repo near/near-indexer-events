@@ -17,7 +17,7 @@ mod rpc_helpers;
 
 // Categories for logging
 // TODO naming
-pub(crate) const INDEXER: &str = "indexer";
+pub(crate) const INDEXER: &str = "indexer_events";
 
 const INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 const MAX_DELAY_TIME: std::time::Duration = std::time::Duration::from_secs(120);
@@ -31,21 +31,12 @@ pub struct AccountWithContract {
 pub type FtBalanceCache =
     std::sync::Arc<Mutex<SizedCache<AccountWithContract, near_primitives::types::Balance>>>;
 
-// wrap near created at block 29998008
-// --s3-bucket-name near-lake-data-mainnet --s3-region-name eu-central-1 --near-archival-rpc-url https://archival-rpc.mainnet.near.org --start-block-height 29998000
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
-
     let opts: Opts = Opts::parse();
 
-    // todo it's a good idea to profile it.
-    //  From time to time, it works slow as hell, sometimes rpc is not responding at all. Probably it's UAE network jokes
-
-    // let pool = sqlx::PgPool::connect_with(options).await?;
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
-    // TODO Error: while executing migrations: error returned from database: 1128 (HY000): Function 'near_indexer.GET_LOCK' is not defined
-    // sqlx::migrate!().run(&pool).await?;
 
     let config = near_lake_framework::LakeConfigBuilder::default()
         .s3_bucket_name(opts.s3_bucket_name)
@@ -100,7 +91,8 @@ async fn handle_streamer_message(
     ft_balance_cache: &FtBalanceCache,
 ) -> anyhow::Result<u64> {
     if streamer_message.block.header.height % 100 == 0 {
-        eprintln!(
+        tracing::info!(
+            target: crate::INDEXER,
             "{} / shards {}",
             streamer_message.block.header.height,
             streamer_message.shards.len()
@@ -113,14 +105,19 @@ async fn handle_streamer_message(
 }
 
 fn init_tracing() {
-    let mut env_filter = EnvFilter::new("near_lake_framework=info");
+    let mut env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
 
     if let Ok(rust_log) = std::env::var("RUST_LOG") {
         if !rust_log.is_empty() {
             for directive in rust_log.split(',').filter_map(|s| match s.parse() {
                 Ok(directive) => Some(directive),
                 Err(err) => {
-                    eprintln!("Ignoring directive `{}`: {}", s, err);
+                    tracing::warn!(
+                        target: crate::INDEXER,
+                        "Ignoring directive `{}`: {}",
+                        s,
+                        err
+                    );
                     None
                 }
             }) {

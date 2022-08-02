@@ -20,5 +20,5 @@ source $HOME/.cargo/env
 ulimit -n 30000
 cargo build --release
 #!!! here you need to create .env in the root of the project, and .aws in ~
-cargo run --release -- --s3-bucket-name near-lake-data-mainnet --s3-region-name eu-central-1 --start-block-height 9820210
+cargo run --release -- --s3-bucket-name near-lake-data-mainnet --s3-region-name eu-central-1 --near-archival-rpc-url https://archival-rpc.mainnet.near.org --start-block-height 9820210
 ```

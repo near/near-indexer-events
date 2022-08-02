@@ -2,7 +2,6 @@ use super::event_types;
 use crate::db_adapters::event_types::{Nep141EventKind, Nep171EventKind};
 use crate::db_adapters::wrap_near_events;
 use near_lake_framework::near_indexer_primitives;
-use tracing::warn;
 
 pub(crate) enum Event {
     Nep141,
@@ -134,7 +133,7 @@ fn extract_events(
         ) {
             Ok(result) => Some(result),
             Err(err) => {
-                warn!(
+                tracing::warn!(
                     target: crate::INDEXER,
                     "Provided event log does not correspond to any of formats defined in NEP. Will ignore this event. \n {:#?} \n{:#?}",
                     err,

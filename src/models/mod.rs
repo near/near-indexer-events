@@ -54,7 +54,8 @@ async fn insert_retry_or_panic<T: SqlMethods + std::fmt::Debug>(
         match sqlx::query_with(&query, args).execute(pool).await {
             Ok(_) => break,
             Err(async_error) => {
-                eprintln!(
+                tracing::warn!(
+                    target: crate::INDEXER,
                     "Error occurred during {}:\n{} were not stored. \n{:#?} \n Retrying in {} milliseconds...",
                     async_error,
                     &T::name(),
