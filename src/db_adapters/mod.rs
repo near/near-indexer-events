@@ -6,8 +6,8 @@ mod coin_events;
 mod event_types;
 pub(crate) mod events;
 mod ft_balance_utils;
+mod legacy_ft;
 mod nft_events;
-mod legacy_ft_contracts;
 
 pub(crate) const CHUNK_SIZE_FOR_BATCH_INSERT: usize = 100;
 pub(crate) const RETRY_COUNT: usize = 10;
@@ -38,6 +38,7 @@ fn compose_db_index(
         events::Event::Nep141 => 1,
         events::Event::Nep171 => 2,
         events::Event::WrapNear => 3,
+        events::Event::RainbowBridge => 4,
     };
     let db_index: u128 = timestamp_millis * 100_000_000_000 * 100_000_000_000
         + (*shard_id as u128) * 10_000_000

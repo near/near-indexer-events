@@ -1,12 +1,14 @@
 use super::event_types;
 use crate::db_adapters::event_types::{Nep141EventKind, Nep171EventKind};
-use crate::db_adapters::legacy_ft_contracts::wrap_near_events;
+use crate::db_adapters::legacy_ft;
+use futures::future::try_join_all;
 use near_lake_framework::near_indexer_primitives;
 
 pub(crate) enum Event {
     Nep141,
     Nep171,
     WrapNear,
+    RainbowBridge,
 }
 
 pub(crate) async fn store_events(
@@ -26,7 +28,17 @@ pub(crate) async fn store_events(
     });
 
     let legacy_wrap_near_futures = streamer_message.shards.iter().map(|shard| {
-        wrap_near_events::store_wrap_near(
+        legacy_ft::store_wrap_near(
+            pool,
+            json_rpc_client,
+            &shard.shard_id,
+            &shard.receipt_execution_outcomes,
+            &streamer_message.block.header,
+            ft_balance_cache,
+        )
+    });
+    let legacy_rainbow_bridge_futures = streamer_message.shards.iter().map(|shard| {
+        legacy_ft::store_rainbow_bridge(
             pool,
             json_rpc_client,
             &shard.shard_id,
@@ -36,10 +48,9 @@ pub(crate) async fn store_events(
         )
     });
 
-    futures::future::try_join_all(events_futures)
-        .await
-        .map(|_| ())?;
-    futures::future::try_join_all(legacy_wrap_near_futures)
+    try_join_all(events_futures).await.map(|_| ())?;
+    try_join_all(legacy_wrap_near_futures).await.map(|_| ())?;
+    try_join_all(legacy_rainbow_bridge_futures)
         .await
         .map(|_| ())
 }
