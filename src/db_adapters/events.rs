@@ -1,6 +1,6 @@
 use super::event_types;
 use crate::db_adapters::event_types::{Nep141EventKind, Nep171EventKind};
-use crate::db_adapters::wrap_near_events;
+use crate::db_adapters::legacy_ft_contracts::wrap_near_events;
 use near_lake_framework::near_indexer_primitives;
 
 pub(crate) enum Event {

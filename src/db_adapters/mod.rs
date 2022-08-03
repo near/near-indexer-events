@@ -7,7 +7,7 @@ mod event_types;
 pub(crate) mod events;
 mod ft_balance_utils;
 mod nft_events;
-mod wrap_near_events;
+mod legacy_ft_contracts;
 
 pub(crate) const CHUNK_SIZE_FOR_BATCH_INSERT: usize = 100;
 pub(crate) const RETRY_COUNT: usize = 10;
