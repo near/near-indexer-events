@@ -39,6 +39,8 @@ fn compose_db_index(
         events::Event::Nep171 => 2,
         events::Event::WrapNear => 3,
         events::Event::RainbowBridge => 4,
+        events::Event::TknNear => 5,
+        events::Event::Wentokensir => 6,
     };
     let db_index: u128 = timestamp_millis * 100_000_000_000 * 100_000_000_000
         + (*shard_id as u128) * 10_000_000

@@ -132,6 +132,7 @@ async fn get_balance(
     result
 }
 
+// todo add retry here
 pub(crate) async fn get_balance_from_rpc(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     block_hash: &near_indexer_primitives::CryptoHash,

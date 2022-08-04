@@ -9,14 +9,18 @@ pub(crate) enum Event {
     Nep171,
     WrapNear,
     RainbowBridge,
+    TknNear,
+    Wentokensir,
 }
 
+// todo it would be nice to expand events standard with the indicator that metadata is updated
 pub(crate) async fn store_events(
     pool: &sqlx::Pool<sqlx::Postgres>,
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     streamer_message: &near_indexer_primitives::StreamerMessage,
     ft_balance_cache: &crate::FtBalanceCache,
 ) -> anyhow::Result<()> {
+    // todo we can emit the event twice if the contract started to produce logs. Do something with it
     let events_futures = streamer_message.shards.iter().map(|shard| {
         collect_and_store_events(
             pool,
@@ -26,18 +30,9 @@ pub(crate) async fn store_events(
             ft_balance_cache,
         )
     });
+    try_join_all(events_futures).await.map(|_| ())?;
 
-    let legacy_wrap_near_futures = streamer_message.shards.iter().map(|shard| {
-        legacy_ft::store_wrap_near(
-            pool,
-            json_rpc_client,
-            &shard.shard_id,
-            &shard.receipt_execution_outcomes,
-            &streamer_message.block.header,
-            ft_balance_cache,
-        )
-    });
-    let legacy_rainbow_bridge_futures = streamer_message.shards.iter().map(|shard| {
+    let rainbow_bridge_futures = streamer_message.shards.iter().map(|shard| {
         legacy_ft::store_rainbow_bridge(
             pool,
             json_rpc_client,
@@ -47,12 +42,43 @@ pub(crate) async fn store_events(
             ft_balance_cache,
         )
     });
+    try_join_all(rainbow_bridge_futures).await.map(|_| ())?;
 
-    try_join_all(events_futures).await.map(|_| ())?;
-    try_join_all(legacy_wrap_near_futures).await.map(|_| ())?;
-    try_join_all(legacy_rainbow_bridge_futures)
-        .await
-        .map(|_| ())
+    let tkn_near_futures = streamer_message.shards.iter().map(|shard| {
+        legacy_ft::store_tkn_near(
+            pool,
+            json_rpc_client,
+            &shard.shard_id,
+            &shard.receipt_execution_outcomes,
+            &streamer_message.block.header,
+            ft_balance_cache,
+        )
+    });
+    try_join_all(tkn_near_futures).await.map(|_| ())?;
+
+    let wentokensir_futures = streamer_message.shards.iter().map(|shard| {
+        legacy_ft::store_wentokensir(
+            pool,
+            json_rpc_client,
+            &shard.shard_id,
+            &shard.receipt_execution_outcomes,
+            &streamer_message.block.header,
+            ft_balance_cache,
+        )
+    });
+    try_join_all(wentokensir_futures).await.map(|_| ())?;
+
+    let wrap_near_futures = streamer_message.shards.iter().map(|shard| {
+        legacy_ft::store_wrap_near(
+            pool,
+            json_rpc_client,
+            &shard.shard_id,
+            &shard.receipt_execution_outcomes,
+            &streamer_message.block.header,
+            ft_balance_cache,
+        )
+    });
+    try_join_all(wrap_near_futures).await.map(|_| ())
 }
 
 async fn collect_and_store_events(

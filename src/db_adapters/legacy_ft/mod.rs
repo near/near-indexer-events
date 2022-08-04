@@ -4,9 +4,13 @@ use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
 
 mod rainbow_bridge_events;
+mod tkn_near_events;
+mod wentokensir;
 mod wrap_near_events;
 
 pub(crate) use rainbow_bridge_events::store_rainbow_bridge;
+pub(crate) use tkn_near_events::store_tkn_near;
+pub(crate) use wentokensir::store_wentokensir;
 pub(crate) use wrap_near_events::store_wrap_near;
 
 struct EventBase {
@@ -64,6 +68,7 @@ async fn build_event(
     )
     .await?;
 
+    // todo discuss do we want to leave this code here forever
     // I calc it just to check the logic. Should be dropped in the end
     // actually they could be different if the block contains more than one operations with this account
     // but it's enough to check at least something

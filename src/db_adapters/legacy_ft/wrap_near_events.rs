@@ -91,8 +91,6 @@ async fn process_wrap_near_functions(
 
     // MINT produces 1 event, where involved_account_id is NULL
     if method_name == "near_deposit" {
-        // block 68814971, receipt 2g7EpDnSBNAv9iLeQX31DvJ3RedPteTPSoWT5PvdSbA6
-        // https://explorer.near.org/transactions/A8VxiibuqVwvK6KqKkSqfRCsFVzw2Fe53Cyh744bMbYE#2g7EpDnSBNAv9iLeQX31DvJ3RedPteTPSoWT5PvdSbA6
         let delta = BigDecimal::from_str(&deposit.to_string())?;
         let base = legacy_ft::get_base(
             Event::WrapNear,
@@ -118,13 +116,6 @@ async fn process_wrap_near_functions(
     // 1. affected_account_id is sender, delta is negative, absolute_amount decreased
     // 2. affected_account_id is receiver, delta is positive, absolute_amount increased
     if method_name == "ft_transfer" || method_name == "ft_transfer_call" {
-        // ft_transfer
-        // block 68814912, receipt 3npphttR2J4EmxMrB8NGSu3icjEhaqiWS5vP5FVTTfjJ
-        // https://explorer.near.org/transactions/EXuc2SVXfvexPxNggo5XdQD9JKABfv9i7LwdUUTX4ySG#3npphttR2J4EmxMrB8NGSu3icjEhaqiWS5vP5FVTTfjJ
-
-        // ft_transfer_call
-        // block 68814941, receipt Huxfk2oVoPeWWKHgRgMY5VdJ1Cjec3HKGFhrRYMdrn2h
-        // https://explorer.near.org/transactions/zVVciak15t3UcqjqmJzgvYVfPCMYEmbthQFnCeHzEtP#Huxfk2oVoPeWWKHgRgMY5VdJ1Cjec3HKGFhrRYMdrn2h
         let ft_transfer_args = match serde_json::from_slice::<FtTransfer>(&decoded_args) {
             Ok(x) => x,
             Err(err) => {
@@ -287,8 +278,6 @@ async fn process_wrap_near_functions(
 
     // BURN produces 1 event, where involved_account_id is NULL
     if method_name == "near_withdraw" {
-        // block 68814918, receipt 9nPRqp6vtr7iEDoDnPsinY34msJTTh8GUw4BnYQcW8Gu
-        // https://explorer.near.org/transactions/4LP9CZwWZ75vdUyLnnS33TqJCDBg5drwsThm7PCHosWZ#9nPRqp6vtr7iEDoDnPsinY34msJTTh8GUw4BnYQcW8Gu
         let ft_burn_args = match serde_json::from_slice::<NearWithdraw>(&decoded_args) {
             Ok(x) => x,
             Err(err) => {
