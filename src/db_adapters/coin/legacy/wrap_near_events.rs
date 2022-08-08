@@ -7,7 +7,7 @@ use near_lake_framework::near_indexer_primitives;
 use near_primitives::types::AccountId;
 use near_primitives::views::{ActionView, ExecutionStatusView, ReceiptEnumView};
 use serde::Deserialize;
-use std::ops::Mul;
+use std::ops::{Mul, Sub};
 use std::str::FromStr;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -187,7 +187,16 @@ async fn process_wrap_near_functions(
                 }
             }
         };
-        let delta = BigDecimal::from_str(&ft_refund_args.amount)?;
+        let mut delta = BigDecimal::from_str(&ft_refund_args.amount)?;
+        // The contract may return only the part of the coins.
+        // We should parse it from the output and subtract from the value from args
+        if let ExecutionStatusView::SuccessValue(transferred_amount_decoded) =
+            &outcome.execution_outcome.outcome.status
+        {
+            let transferred_amount =
+                serde_json::from_slice::<String>(&base64::decode(transferred_amount_decoded)?)?;
+            delta = delta.sub(BigDecimal::from_str(&transferred_amount)?);
+        }
         let negative_delta = delta.clone().mul(BigDecimal::from(-1));
         let memo = ft_refund_args
             .memo
