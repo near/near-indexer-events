@@ -20,7 +20,7 @@ pub(crate) async fn update_cache_and_get_balance(
         contract_account_id: contract_id.clone(),
     };
     let prev_absolute_amount = BigDecimal::from_str(
-        &get_balance_retriable(
+        &get_balance(
             account_with_contract.clone(),
             prev_block_hash,
             ft_balance_cache,
@@ -62,11 +62,29 @@ async fn save_latest_balance(
     drop(balances_cache_lock);
 }
 
-async fn get_balance_retriable(
+async fn get_balance(
     account_with_contract: crate::AccountWithContract,
     block_hash: &near_indexer_primitives::CryptoHash,
     ft_balance_cache: &crate::FtBalanceCache,
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
+) -> anyhow::Result<near_primitives::types::Balance> {
+    if let Some(balance) = get_balance_from_cache(&account_with_contract, ft_balance_cache).await {
+        return Ok(balance);
+    };
+    get_balance_from_rpc_retriable(
+        json_rpc_client,
+        block_hash,
+        account_with_contract.contract_account_id,
+        account_with_contract.account_id.as_str(),
+    )
+    .await
+}
+
+async fn get_balance_from_rpc_retriable(
+    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
+    block_hash: &near_indexer_primitives::CryptoHash,
+    contract_id: near_primitives::types::AccountId,
+    account_id: &str,
 ) -> anyhow::Result<near_primitives::types::Balance> {
     let mut interval = crate::INTERVAL;
     let mut retry_attempt = 0usize;
@@ -74,28 +92,24 @@ async fn get_balance_retriable(
     loop {
         if retry_attempt == crate::db_adapters::RETRY_COUNT {
             anyhow::bail!(
-                "Failed to perform query to RPC after {} attempts. Stop trying.\nAccount {}, block_hash {}",
+                "Failed to perform query to RPC after {} attempts. Stop trying.\nContract {}, block_hash {}",
                 crate::db_adapters::RETRY_COUNT,
-                account_with_contract.account_id.to_string(),
+                contract_id,
                 block_hash.to_string()
             );
         }
         retry_attempt += 1;
 
-        match get_balance(
-            account_with_contract.clone(),
-            block_hash,
-            ft_balance_cache,
-            json_rpc_client,
-        )
-        .await
+        match get_balance_from_rpc(json_rpc_client, block_hash, contract_id.clone(), account_id)
+            .await
         {
             Ok(res) => return Ok(res),
             Err(err) => {
                 tracing::error!(
                     target: crate::INDEXER,
-                    "Failed to request account view details from RPC for account {}, block_hash {}.{}\n Retrying in {} milliseconds...",
-                    account_with_contract.account_id.to_string(),
+                    "Failed to request ft_balance from RPC for account {}, contract {}, block_hash {}.{}\n Retrying in {} milliseconds...",
+                    account_id,
+                    contract_id,
                     block_hash.to_string(),
                     err,
                     interval.as_millis(),
@@ -109,31 +123,19 @@ async fn get_balance_retriable(
     }
 }
 
-async fn get_balance(
-    account_with_contract: crate::AccountWithContract,
-    block_hash: &near_indexer_primitives::CryptoHash,
+async fn get_balance_from_cache(
+    account_with_contract: &crate::AccountWithContract,
     ft_balance_cache: &crate::FtBalanceCache,
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
-) -> anyhow::Result<near_primitives::types::Balance> {
+) -> Option<near_primitives::types::Balance> {
     let mut balances_cache_lock = ft_balance_cache.lock().await;
-    let result = match balances_cache_lock.cache_get(&account_with_contract) {
-        None => {
-            get_balance_from_rpc(
-                json_rpc_client,
-                block_hash,
-                account_with_contract.contract_account_id,
-                account_with_contract.account_id.as_str(),
-            )
-            .await
-        }
-        Some(balance) => Ok(*balance),
-    };
+    let result = balances_cache_lock
+        .cache_get(account_with_contract)
+        .copied();
     drop(balances_cache_lock);
     result
 }
 
-// todo add retry here
-pub(crate) async fn get_balance_from_rpc(
+async fn get_balance_from_rpc(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     block_hash: &near_indexer_primitives::CryptoHash,
     contract_id: near_primitives::types::AccountId,
@@ -149,4 +151,31 @@ pub(crate) async fn get_balance_from_rpc(
         crate::rpc_helpers::wrapped_call(json_rpc_client, request, block_hash, &contract_id)
             .await?;
     Ok(serde_json::from_slice::<String>(&response.result)?.parse::<u128>()?)
+}
+
+pub(crate) async fn check_balance(
+    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
+    block_hash: &near_indexer_primitives::CryptoHash,
+    contract_id: &str,
+    account_id: &str,
+    amount: &BigDecimal,
+) -> anyhow::Result<()> {
+    let correct_value = get_balance_from_rpc_retriable(
+        json_rpc_client,
+        block_hash,
+        near_primitives::types::AccountId::from_str(contract_id)?,
+        account_id,
+    )
+    .await?;
+    if correct_value != amount.to_string().parse::<u128>()? {
+        anyhow::bail!(
+            "Balance is wrong for account {}, contract {}: expected {}, actual {}. Block {}",
+            account_id,
+            contract_id,
+            correct_value,
+            amount,
+            block_hash,
+        )
+    }
+    Ok(())
 }

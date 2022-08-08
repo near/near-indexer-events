@@ -47,7 +47,9 @@ pub(crate) async fn collect_tkn_near(
     let mut events: Vec<CoinEvent> = vec![];
 
     for outcome in receipt_execution_outcomes {
-        if !is_tkn_near_contract(outcome.execution_outcome.outcome.executor_id.as_str()) {
+        if !is_tkn_near_contract(outcome.execution_outcome.outcome.executor_id.as_str())
+            || !db_adapters::events::extract_events(outcome).is_empty()
+        {
             continue;
         }
         if let ReceiptEnumView::Action { actions, .. } = &outcome.receipt.receipt {

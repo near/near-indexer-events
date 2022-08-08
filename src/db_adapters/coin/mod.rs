@@ -31,8 +31,21 @@ pub(crate) async fn store_ft(
         events.extend(events_by_shard);
     }
 
-    // todo we can emit the event twice if the contract started to produce logs. Do something with it
-    // todo here should be check
+    // After all the parallelism, events should be still sorted accurately,
+    // So that we could go backwards and check the balance for each affected user
+    let mut accounts_with_changes = std::collections::HashSet::new();
+    for event in events.iter().rev() {
+        if accounts_with_changes.insert(&event.affected_account_id) {
+            balance_utils::check_balance(
+                json_rpc_client,
+                &streamer_message.block.header.hash,
+                &event.contract_account_id,
+                &event.affected_account_id,
+                &event.absolute_amount,
+            )
+            .await?;
+        }
+    }
 
     crate::models::chunked_insert(pool, &events).await
 }
@@ -119,29 +132,6 @@ async fn build_event(
         &custom.delta,
     )
     .await?;
-
-    // todo discuss do we want to leave this code here forever
-    // I calc it just to check the logic. Should be dropped in the end
-    // actually they could be different if the block contains more than one operations with this account
-    // but it's enough to check at least something
-    let correct_value = balance_utils::get_balance_from_rpc(
-        json_rpc_client,
-        &block_header.hash,
-        base.contract_account_id.clone(),
-        custom.affected_id.as_str(),
-    )
-    .await?;
-    if correct_value != absolute_amount.to_string().parse::<u128>()? {
-        tracing::error!(
-            target: crate::INDEXER,
-            "{} different amounts for {}: expected {}, actual {}. Index {}",
-            block_header.height,
-            custom.affected_id.as_str(),
-            correct_value,
-            absolute_amount.to_string().parse::<u128>()?,
-            base.event_index,
-        );
-    }
 
     Ok(CoinEvent {
         event_index: base.event_index,

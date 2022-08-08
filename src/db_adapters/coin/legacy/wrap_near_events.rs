@@ -40,7 +40,9 @@ pub(crate) async fn collect_wrap_near(
     let mut events: Vec<CoinEvent> = vec![];
 
     for outcome in receipt_execution_outcomes {
-        if outcome.execution_outcome.outcome.executor_id != AccountId::from_str("wrap.near")? {
+        if outcome.execution_outcome.outcome.executor_id != AccountId::from_str("wrap.near")?
+            || !db_adapters::events::extract_events(outcome).is_empty()
+        {
             continue;
         }
         if let ReceiptEnumView::Action { actions, .. } = &outcome.receipt.receipt {
