@@ -155,26 +155,27 @@ async fn get_balance_from_rpc(
 
 pub(crate) async fn check_balance(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
-    block_hash: &near_indexer_primitives::CryptoHash,
+    block_header: &near_primitives::views::BlockHeaderView,
     contract_id: &str,
     account_id: &str,
     amount: &BigDecimal,
 ) -> anyhow::Result<()> {
     let correct_value = get_balance_from_rpc_retriable(
         json_rpc_client,
-        block_hash,
+        &block_header.hash,
         near_primitives::types::AccountId::from_str(contract_id)?,
         account_id,
     )
     .await?;
     if correct_value != amount.to_string().parse::<u128>()? {
         anyhow::bail!(
-            "Balance is wrong for account {}, contract {}: expected {}, actual {}. Block {}",
+            "Balance is wrong for account {}, contract {}: expected {}, actual {}. Block {} {}",
             account_id,
             contract_id,
             correct_value,
             amount,
-            block_hash,
+            block_header.height,
+            block_header.hash,
         )
     }
     Ok(())

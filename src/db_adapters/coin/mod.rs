@@ -38,12 +38,21 @@ pub(crate) async fn store_ft(
         if accounts_with_changes.insert(&event.affected_account_id) {
             balance_utils::check_balance(
                 json_rpc_client,
-                &streamer_message.block.header.hash,
+                &streamer_message.block.header,
                 &event.contract_account_id,
                 &event.affected_account_id,
                 &event.absolute_amount,
             )
-            .await?;
+            .await
+            .map_err(|x| {
+                events
+                    .iter()
+                    .filter(|e| e.affected_account_id == event.affected_account_id)
+                    .for_each(|e| {
+                        tracing::error!(target: crate::INDEXER, "{:?}", e);
+                    });
+                x
+            })?;
         }
     }
 
