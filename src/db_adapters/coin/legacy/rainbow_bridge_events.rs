@@ -34,7 +34,8 @@ struct FtRefund {
 #[derive(Deserialize, Debug, Clone)]
 struct Withdraw {
     pub amount: String,
-    pub recipient: AccountId,
+    // Contains internal info of bridged contracts. It's not NEAR account_id
+    // pub recipient: AccountId,
 }
 
 pub(crate) async fn collect_rainbow_bridge(
@@ -131,14 +132,13 @@ async fn process_rainbow_bridge_functions(
             block_header,
         )?;
         let custom = coin::FtEvent {
-            // These are the same values, actually
-            affected_id: mint_args.account_id.clone(), //outcome.receipt.predecessor_id.clone(),
+            // We can't use here outcome.receipt.predecessor_id, it's usually factory.bridge.near
+            affected_id: mint_args.account_id.clone(),
             involved_id: None,
             delta,
             cause: "MINT".to_string(),
             memo: None,
         };
-        assert_eq!(mint_args.account_id, outcome.receipt.predecessor_id);
         events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
         return Ok(());
     }
@@ -325,14 +325,12 @@ async fn process_rainbow_bridge_functions(
             block_header,
         )?;
         let custom = coin::FtEvent {
-            // These are the same values, actually
-            affected_id: ft_burn_args.recipient.clone(), //outcome.receipt.predecessor_id.clone(),
+            affected_id: outcome.receipt.predecessor_id.clone(),
             involved_id: None,
             delta: negative_delta,
             cause: "BURN".to_string(),
             memo: None,
         };
-        assert_eq!(ft_burn_args.recipient, outcome.receipt.predecessor_id);
         events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
         return Ok(());
     }
