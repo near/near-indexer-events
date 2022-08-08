@@ -43,7 +43,7 @@ pub(crate) async fn update_cache_and_get_balance(
             contract_id
         )
     }
-    save_latest_ft_balance(
+    save_latest_balance(
         account_with_contract,
         absolute_amount.to_string().parse::<u128>()?,
         ft_balance_cache,
@@ -52,7 +52,7 @@ pub(crate) async fn update_cache_and_get_balance(
     Ok(absolute_amount)
 }
 
-async fn save_latest_ft_balance(
+async fn save_latest_balance(
     account_with_contract: crate::AccountWithContract,
     balance: near_indexer_primitives::types::Balance,
     ft_balance_cache: &crate::FtBalanceCache,

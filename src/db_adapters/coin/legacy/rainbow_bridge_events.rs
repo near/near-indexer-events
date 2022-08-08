@@ -1,6 +1,6 @@
-use crate::db_adapters::events::Event;
-use crate::db_adapters::legacy_ft;
-use crate::models;
+use crate::db_adapters;
+use crate::db_adapters::coin;
+use crate::db_adapters::Event;
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
@@ -9,6 +9,12 @@ use near_primitives::views::{ActionView, ExecutionStatusView, ReceiptEnumView};
 use serde::Deserialize;
 use std::ops::Mul;
 use std::str::FromStr;
+
+#[derive(Deserialize, Debug, Clone)]
+struct Mint {
+    pub account_id: AccountId,
+    pub amount: String,
+}
 
 #[derive(Deserialize, Debug, Clone)]
 struct FtTransfer {
@@ -26,27 +32,27 @@ struct FtRefund {
 }
 
 #[derive(Deserialize, Debug, Clone)]
-struct NearWithdraw {
+struct Withdraw {
     pub amount: String,
+    pub recipient: AccountId,
 }
 
-pub(crate) async fn store_wrap_near(
-    pool: &sqlx::Pool<sqlx::Postgres>,
+pub(crate) async fn collect_rainbow_bridge(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     shard_id: &near_indexer_primitives::types::ShardId,
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     ft_balance_cache: &crate::FtBalanceCache,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<CoinEvent>> {
     let mut events: Vec<CoinEvent> = vec![];
 
     for outcome in receipt_execution_outcomes {
-        if outcome.execution_outcome.outcome.executor_id != AccountId::from_str("wrap.near")? {
+        if !is_rainbow_bridge_contract(outcome.execution_outcome.outcome.executor_id.as_str()) {
             continue;
         }
         if let ReceiptEnumView::Action { actions, .. } = &outcome.receipt.receipt {
             for action in actions {
-                process_wrap_near_functions(
+                process_rainbow_bridge_functions(
                     &mut events,
                     json_rpc_client,
                     shard_id,
@@ -59,12 +65,21 @@ pub(crate) async fn store_wrap_near(
             }
         }
     }
-
-    models::chunked_insert(pool, &events).await?;
-    Ok(())
+    Ok(events)
 }
 
-async fn process_wrap_near_functions(
+fn is_rainbow_bridge_contract(contract_id: &str) -> bool {
+    if let Some(contract_prefix) = contract_id.strip_suffix(".factory.bridge.near") {
+        lazy_static::lazy_static! {
+            static ref RE: regex::Regex = regex::Regex::new("^[a-f0-9]+$").unwrap();
+        }
+        contract_prefix.len() == 40 && RE.is_match(contract_prefix)
+    } else {
+        false
+    }
+}
+
+async fn process_rainbow_bridge_functions(
     events: &mut Vec<CoinEvent>,
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     shard_id: &near_indexer_primitives::types::ShardId,
@@ -73,7 +88,7 @@ async fn process_wrap_near_functions(
     action: &ActionView,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
 ) -> anyhow::Result<()> {
-    let (method_name, args, deposit) = match action {
+    let (method_name, args, ..) = match action {
         ActionView::FunctionCall {
             method_name,
             args,
@@ -85,30 +100,44 @@ async fn process_wrap_near_functions(
 
     let decoded_args = base64::decode(args)?;
 
-    if method_name == "storage_deposit" {
+    if vec!["storage_deposit", "finish_deposit", "verify_log_entry"].contains(&method_name.as_str())
+    {
         return Ok(());
     }
 
     // MINT produces 1 event, where involved_account_id is NULL
-    if method_name == "near_deposit" {
-        let delta = BigDecimal::from_str(&deposit.to_string())?;
-        let base = legacy_ft::get_base(
-            Event::WrapNear,
+    if method_name == "mint" {
+        let mint_args = match serde_json::from_slice::<Mint>(&decoded_args) {
+            Ok(x) => x,
+            Err(err) => {
+                match outcome.execution_outcome.outcome.status {
+                    // We couldn't parse args for failed receipt. Let's just ignore it, we can't save it properly
+                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => return Ok(()),
+                    ExecutionStatusView::SuccessValue(_)
+                    | ExecutionStatusView::SuccessReceiptId(_) => {
+                        anyhow::bail!(err)
+                    }
+                }
+            }
+        };
+        let delta = BigDecimal::from_str(&mint_args.amount)?;
+        let base = db_adapters::get_base(
+            Event::RainbowBridge,
             shard_id,
             events.len(),
             outcome,
             block_header,
         )?;
-        let custom = legacy_ft::EventCustom {
-            affected_id: outcome.receipt.predecessor_id.clone(),
+        let custom = coin::FtEvent {
+            // These are the same values, actually
+            affected_id: mint_args.account_id.clone(), //outcome.receipt.predecessor_id.clone(),
             involved_id: None,
             delta,
             cause: "MINT".to_string(),
             memo: None,
         };
-        events.push(
-            legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-        );
+        assert_eq!(mint_args.account_id, outcome.receipt.predecessor_id);
+        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
         return Ok(());
     }
 
@@ -137,41 +166,37 @@ async fn process_wrap_near_functions(
             .as_ref()
             .map(|s| s.escape_default().to_string());
 
-        let base = legacy_ft::get_base(
-            Event::WrapNear,
+        let base = db_adapters::get_base(
+            Event::RainbowBridge,
             shard_id,
             events.len(),
             outcome,
             block_header,
         )?;
-        let custom = legacy_ft::EventCustom {
+        let custom = coin::FtEvent {
             affected_id: outcome.receipt.predecessor_id.clone(),
             involved_id: Some(ft_transfer_args.receiver_id.clone()),
             delta: negative_delta,
             cause: "TRANSFER".to_string(),
             memo: memo.clone(),
         };
-        events.push(
-            legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-        );
+        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
 
-        let base = legacy_ft::get_base(
-            Event::WrapNear,
+        let base = db_adapters::get_base(
+            Event::RainbowBridge,
             shard_id,
             events.len(),
             outcome,
             block_header,
         )?;
-        let custom = legacy_ft::EventCustom {
+        let custom = coin::FtEvent {
             affected_id: ft_transfer_args.receiver_id,
             involved_id: Some(outcome.receipt.predecessor_id.clone()),
             delta,
             cause: "TRANSFER".to_string(),
             memo,
         };
-        events.push(
-            legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-        );
+        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
         return Ok(());
     }
 
@@ -211,14 +236,14 @@ async fn process_wrap_near_functions(
                 );
 
                 // we should revert ft_transfer_call, but there's no receiver_id. We should burn tokens
-                let base = legacy_ft::get_base(
-                    Event::WrapNear,
+                let base = db_adapters::get_base(
+                    Event::RainbowBridge,
                     shard_id,
                     events.len(),
                     outcome,
                     block_header,
                 )?;
-                let custom = legacy_ft::EventCustom {
+                let custom = coin::FtEvent {
                     affected_id: ft_refund_args.receiver_id,
                     involved_id: None,
                     delta: negative_delta,
@@ -226,21 +251,20 @@ async fn process_wrap_near_functions(
                     memo,
                 };
                 events.push(
-                    legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom)
-                        .await?,
+                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
                 );
                 return Ok(());
             }
             if log.starts_with("Refund ") {
                 // we should revert ft_transfer_call
-                let base = legacy_ft::get_base(
-                    Event::WrapNear,
+                let base = db_adapters::get_base(
+                    Event::RainbowBridge,
                     shard_id,
                     events.len(),
                     outcome,
                     block_header,
                 )?;
-                let custom = legacy_ft::EventCustom {
+                let custom = coin::FtEvent {
                     affected_id: ft_refund_args.receiver_id.clone(),
                     involved_id: Some(ft_refund_args.sender_id.clone()),
                     delta: negative_delta,
@@ -248,18 +272,17 @@ async fn process_wrap_near_functions(
                     memo: memo.clone(),
                 };
                 events.push(
-                    legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom)
-                        .await?,
+                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
                 );
 
-                let base = legacy_ft::get_base(
-                    Event::WrapNear,
+                let base = db_adapters::get_base(
+                    Event::RainbowBridge,
                     shard_id,
                     events.len(),
                     outcome,
                     block_header,
                 )?;
-                let custom = legacy_ft::EventCustom {
+                let custom = coin::FtEvent {
                     affected_id: ft_refund_args.sender_id,
                     involved_id: Some(ft_refund_args.receiver_id),
                     delta,
@@ -267,8 +290,7 @@ async fn process_wrap_near_functions(
                     memo,
                 };
                 events.push(
-                    legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom)
-                        .await?,
+                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
                 );
                 return Ok(());
             }
@@ -277,8 +299,8 @@ async fn process_wrap_near_functions(
     }
 
     // BURN produces 1 event, where involved_account_id is NULL
-    if method_name == "near_withdraw" {
-        let ft_burn_args = match serde_json::from_slice::<NearWithdraw>(&decoded_args) {
+    if method_name == "withdraw" {
+        let ft_burn_args = match serde_json::from_slice::<Withdraw>(&decoded_args) {
             Ok(x) => x,
             Err(err) => {
                 match outcome.execution_outcome.outcome.status {
@@ -293,23 +315,23 @@ async fn process_wrap_near_functions(
         };
         let negative_delta = BigDecimal::from_str(&ft_burn_args.amount)?.mul(BigDecimal::from(-1));
 
-        let base = legacy_ft::get_base(
-            Event::WrapNear,
+        let base = db_adapters::get_base(
+            Event::RainbowBridge,
             shard_id,
             events.len(),
             outcome,
             block_header,
         )?;
-        let custom = legacy_ft::EventCustom {
-            affected_id: outcome.receipt.predecessor_id.clone(),
+        let custom = coin::FtEvent {
+            // These are the same values, actually
+            affected_id: ft_burn_args.recipient.clone(), //outcome.receipt.predecessor_id.clone(),
             involved_id: None,
             delta: negative_delta,
             cause: "BURN".to_string(),
             memo: None,
         };
-        events.push(
-            legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-        );
+        assert_eq!(ft_burn_args.recipient, outcome.receipt.predecessor_id);
+        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
         return Ok(());
     }
 

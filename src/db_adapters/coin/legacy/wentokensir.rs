@@ -1,8 +1,6 @@
-// it has oracle_on_call, but it looks like it does not transfer anything
-
-use crate::db_adapters::events::Event;
-use crate::db_adapters::legacy_ft;
-use crate::models;
+use crate::db_adapters;
+use crate::db_adapters::coin;
+use crate::db_adapters::Event;
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
@@ -38,14 +36,13 @@ struct NearWithdraw {
     pub amount: String,
 }
 
-pub(crate) async fn store_wentokensir(
-    pool: &sqlx::Pool<sqlx::Postgres>,
+pub(crate) async fn collect_wentokensir(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     shard_id: &near_indexer_primitives::types::ShardId,
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     ft_balance_cache: &crate::FtBalanceCache,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<CoinEvent>> {
     let mut events: Vec<CoinEvent> = vec![];
 
     for outcome in receipt_execution_outcomes {
@@ -67,9 +64,7 @@ pub(crate) async fn store_wentokensir(
             }
         }
     }
-
-    models::chunked_insert(pool, &events).await?;
-    Ok(())
+    Ok(events)
 }
 
 fn is_wentokensir_contract(contract_id: &str) -> bool {
@@ -111,23 +106,21 @@ async fn process_wentokensir_functions(
     // MINT produces 1 event, where involved_account_id is NULL
     if method_name == "near_deposit" {
         let delta = BigDecimal::from_str(&deposit.to_string())?;
-        let base = legacy_ft::get_base(
+        let base = db_adapters::get_base(
             Event::Wentokensir,
             shard_id,
             events.len(),
             outcome,
             block_header,
         )?;
-        let custom = legacy_ft::EventCustom {
+        let custom = coin::FtEvent {
             affected_id: outcome.receipt.predecessor_id.clone(),
             involved_id: None,
             delta,
             cause: "MINT".to_string(),
             memo: None,
         };
-        events.push(
-            legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-        );
+        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
         return Ok(());
     }
 
@@ -147,23 +140,21 @@ async fn process_wentokensir_functions(
             }
         };
         let delta = BigDecimal::from_str(&args.amount)?;
-        let base = legacy_ft::get_base(
+        let base = db_adapters::get_base(
             Event::Wentokensir,
             shard_id,
             events.len(),
             outcome,
             block_header,
         )?;
-        let custom = legacy_ft::EventCustom {
+        let custom = coin::FtEvent {
             affected_id: args.sender_id,
             involved_id: None,
             delta,
             cause: "MINT".to_string(),
             memo: None,
         };
-        events.push(
-            legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-        );
+        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
         return Ok(());
     }
 
@@ -192,41 +183,37 @@ async fn process_wentokensir_functions(
             .as_ref()
             .map(|s| s.escape_default().to_string());
 
-        let base = legacy_ft::get_base(
+        let base = db_adapters::get_base(
             Event::Wentokensir,
             shard_id,
             events.len(),
             outcome,
             block_header,
         )?;
-        let custom = legacy_ft::EventCustom {
+        let custom = coin::FtEvent {
             affected_id: outcome.receipt.predecessor_id.clone(),
             involved_id: Some(ft_transfer_args.receiver_id.clone()),
             delta: negative_delta,
             cause: "TRANSFER".to_string(),
             memo: memo.clone(),
         };
-        events.push(
-            legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-        );
+        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
 
-        let base = legacy_ft::get_base(
+        let base = db_adapters::get_base(
             Event::Wentokensir,
             shard_id,
             events.len(),
             outcome,
             block_header,
         )?;
-        let custom = legacy_ft::EventCustom {
+        let custom = coin::FtEvent {
             affected_id: ft_transfer_args.receiver_id,
             involved_id: Some(outcome.receipt.predecessor_id.clone()),
             delta,
             cause: "TRANSFER".to_string(),
             memo,
         };
-        events.push(
-            legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-        );
+        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
         return Ok(());
     }
 
@@ -266,14 +253,14 @@ async fn process_wentokensir_functions(
                 );
 
                 // we should revert ft_transfer_call, but there's no receiver_id. We should burn tokens
-                let base = legacy_ft::get_base(
+                let base = db_adapters::get_base(
                     Event::Wentokensir,
                     shard_id,
                     events.len(),
                     outcome,
                     block_header,
                 )?;
-                let custom = legacy_ft::EventCustom {
+                let custom = coin::FtEvent {
                     affected_id: ft_refund_args.receiver_id,
                     involved_id: None,
                     delta: negative_delta,
@@ -281,21 +268,20 @@ async fn process_wentokensir_functions(
                     memo,
                 };
                 events.push(
-                    legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom)
-                        .await?,
+                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
                 );
                 return Ok(());
             }
             if log.starts_with("Refund ") {
                 // we should revert ft_transfer_call
-                let base = legacy_ft::get_base(
+                let base = db_adapters::get_base(
                     Event::Wentokensir,
                     shard_id,
                     events.len(),
                     outcome,
                     block_header,
                 )?;
-                let custom = legacy_ft::EventCustom {
+                let custom = coin::FtEvent {
                     affected_id: ft_refund_args.receiver_id.clone(),
                     involved_id: Some(ft_refund_args.sender_id.clone()),
                     delta: negative_delta,
@@ -303,18 +289,17 @@ async fn process_wentokensir_functions(
                     memo: memo.clone(),
                 };
                 events.push(
-                    legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom)
-                        .await?,
+                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
                 );
 
-                let base = legacy_ft::get_base(
+                let base = db_adapters::get_base(
                     Event::Wentokensir,
                     shard_id,
                     events.len(),
                     outcome,
                     block_header,
                 )?;
-                let custom = legacy_ft::EventCustom {
+                let custom = coin::FtEvent {
                     affected_id: ft_refund_args.sender_id,
                     involved_id: Some(ft_refund_args.receiver_id),
                     delta,
@@ -322,8 +307,7 @@ async fn process_wentokensir_functions(
                     memo,
                 };
                 events.push(
-                    legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom)
-                        .await?,
+                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
                 );
                 return Ok(());
             }
@@ -349,23 +333,21 @@ async fn process_wentokensir_functions(
         };
         let negative_delta = BigDecimal::from_str(&ft_burn_args.amount)?.mul(BigDecimal::from(-1));
 
-        let base = legacy_ft::get_base(
+        let base = db_adapters::get_base(
             Event::Wentokensir,
             shard_id,
             events.len(),
             outcome,
             block_header,
         )?;
-        let custom = legacy_ft::EventCustom {
+        let custom = coin::FtEvent {
             affected_id: outcome.receipt.predecessor_id.clone(),
             involved_id: None,
             delta: negative_delta,
             cause: "BURN".to_string(),
             memo: None,
         };
-        events.push(
-            legacy_ft::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-        );
+        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
         return Ok(());
     }
 
