@@ -10,7 +10,7 @@ pub(crate) async fn update_cache_and_get_balance(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     ft_balance_cache: &crate::FtBalanceCache,
     execution_status: &ExecutionStatusView,
-    prev_block_hash: &near_indexer_primitives::CryptoHash,
+    block_header: &near_indexer_primitives::views::BlockHeaderView,
     contract_id: near_primitives::types::AccountId,
     account_id: &str,
     delta_amount: &BigDecimal,
@@ -22,7 +22,7 @@ pub(crate) async fn update_cache_and_get_balance(
     let prev_absolute_amount = BigDecimal::from_str(
         &get_balance(
             account_with_contract.clone(),
-            prev_block_hash,
+            &block_header.prev_hash,
             ft_balance_cache,
             json_rpc_client,
         )
@@ -38,9 +38,13 @@ pub(crate) async fn update_cache_and_get_balance(
 
     if absolute_amount.is_negative() {
         anyhow::bail!(
-            "Balance is negative for account {}, contract {}",
+            "Balance {} is negative for account {}, contract {}, block {} {}. Delta {}",
             account_id,
-            contract_id
+            absolute_amount,
+            contract_id,
+            block_header.height,
+            block_header.hash,
+            delta_amount
         )
     }
     save_latest_balance(

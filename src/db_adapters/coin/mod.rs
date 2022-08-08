@@ -135,7 +135,7 @@ async fn build_event(
         json_rpc_client,
         ft_balance_cache,
         &base.status,
-        &block_header.prev_hash,
+        block_header,
         base.contract_account_id.clone(),
         &custom.affected_id,
         &custom.delta,
