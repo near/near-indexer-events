@@ -14,6 +14,7 @@ pub(crate) const RETRY_COUNT: usize = 10;
 pub(crate) enum Event {
     Nep141,
     Nep171,
+    Aurora,
     RainbowBridge,
     TknNear,
     Wentokensir,
@@ -78,6 +79,7 @@ fn compose_db_index(
         Event::TknNear => 4,
         Event::Wentokensir => 5,
         Event::WrapNear => 6,
+        Event::Aurora => 7,
     };
     let db_index: u128 = timestamp_millis * 100_000_000_000 * 100_000_000_000
         + (*shard_id as u128) * 10_000_000

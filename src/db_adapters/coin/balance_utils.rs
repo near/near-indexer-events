@@ -66,7 +66,7 @@ async fn save_latest_balance(
     drop(balances_cache_lock);
 }
 
-async fn get_balance(
+pub(crate) async fn get_balance(
     account_with_contract: crate::AccountWithContract,
     block_hash: &near_indexer_primitives::CryptoHash,
     ft_balance_cache: &crate::FtBalanceCache,
@@ -84,7 +84,7 @@ async fn get_balance(
     .await
 }
 
-async fn get_balance_from_rpc_retriable(
+pub(crate) async fn get_balance_from_rpc_retriable(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     block_hash: &near_indexer_primitives::CryptoHash,
     contract_id: near_primitives::types::AccountId,
@@ -111,7 +111,7 @@ async fn get_balance_from_rpc_retriable(
             Err(err) => {
                 tracing::error!(
                     target: crate::INDEXER,
-                    "Failed to request ft_balance from RPC for account {}, contract {}, block_hash {}.{}\n Retrying in {} milliseconds...",
+                    "Failed to request ft_balance_of from RPC for account {}, contract {}, block_hash {}.{}\n Retrying in {} milliseconds...",
                     account_id,
                     contract_id,
                     block_hash.to_string(),
@@ -154,7 +154,10 @@ async fn get_balance_from_rpc(
     let response =
         crate::rpc_helpers::wrapped_call(json_rpc_client, request, block_hash, &contract_id)
             .await?;
-    Ok(serde_json::from_slice::<String>(&response.result)?.parse::<u128>()?)
+    match serde_json::from_slice::<String>(&response.result) {
+        Ok(x) => Ok(x.parse::<u128>()?),
+        Err(_) => Ok(serde_json::from_slice::<u128>(&response.result)?),
+    }
 }
 
 pub(crate) async fn check_balance(

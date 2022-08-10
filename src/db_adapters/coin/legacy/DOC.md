@@ -12,8 +12,8 @@ Some contracts may mint coins at `ft_on_transfer` method: see `wentokensir`.
 General mint methods are `mint`, `near_deposit`. The logic inside could differ a little.
 
 #### Transfer
-All the legacy contracts have the same logic regarding TRANSFER.  
-They implement `ft_transfer`, `ft_transfer_call`, `ft_resolve_transfer`, the code for handling transfers is the same.
+All the legacy contracts have the same logic regarding TRANSFER except Aurora.  
+They implement `ft_transfer`, `ft_transfer_call`, `ft_resolve_transfer`, the code for handling transfers is the same except Aurora.
 
 #### Burn
 

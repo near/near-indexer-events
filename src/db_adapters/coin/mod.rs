@@ -73,6 +73,13 @@ async fn collect_ft_for_shard(
         &streamer_message.block.header,
         ft_balance_cache,
     );
+    let aurora_future = legacy::collect_aurora(
+        json_rpc_client,
+        &shard.shard_id,
+        &shard.receipt_execution_outcomes,
+        &streamer_message.block.header,
+        ft_balance_cache,
+    );
     let rainbow_bridge_future = legacy::collect_rainbow_bridge(
         json_rpc_client,
         &shard.shard_id,
@@ -104,12 +111,14 @@ async fn collect_ft_for_shard(
 
     let (
         nep141_events,
+        aurora_events,
         rainbow_bridge_events,
         tkn_near_events,
         wentokensir_events,
         wrap_near_events,
     ) = try_join!(
         nep141_future,
+        aurora_future,
         rainbow_bridge_future,
         tkn_near_future,
         wentokensir_future,
@@ -117,6 +126,7 @@ async fn collect_ft_for_shard(
     )?;
 
     events.extend(nep141_events);
+    events.extend(aurora_events);
     events.extend(rainbow_bridge_events);
     events.extend(tkn_near_events);
     events.extend(wentokensir_events);
