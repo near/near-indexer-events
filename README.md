@@ -15,8 +15,8 @@ sqlx migrate run
 ```bash
 sudo apt install git build-essential pkg-config libssl-dev tmux postgresql-client libpq-dev -y
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-cargo install --version=0.5.13 sqlx-cli --features postgres
 source $HOME/.cargo/env
+cargo install --version=0.5.13 sqlx-cli --features postgres
 ulimit -n 30000
 cargo build --release
 #!!! here you need to create .env in the root of the project, and .aws in ~
