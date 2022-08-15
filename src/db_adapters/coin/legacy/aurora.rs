@@ -1,13 +1,15 @@
 use crate::db_adapters;
 use crate::db_adapters::coin;
-use crate::db_adapters::coin::balance_utils;
 use crate::db_adapters::Event;
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
+use near_primitives::borsh;
+use near_primitives::borsh::{BorshDeserialize, BorshSerialize};
 use near_primitives::types::AccountId;
 use near_primitives::views::{ActionView, ExecutionStatusView, ReceiptEnumView};
 use serde::Deserialize;
+use std::io;
 use std::ops::Mul;
 use std::str::FromStr;
 
@@ -16,6 +18,41 @@ struct FtTransfer {
     pub receiver_id: AccountId,
     pub amount: String,
     pub memo: Option<String>,
+}
+
+// Took from the link below + some places around
+// https://github.com/aurora-is-near/aurora-engine/blob/master/engine-types/src/parameters.rs
+/// withdraw NEAR eth-connector call args
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
+pub struct WithdrawCallArgs {
+    pub recipient_address: Address,
+    pub amount: u128,
+}
+
+/// Base Eth Address type
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Address(primitive_types::H160);
+
+impl BorshSerialize for Address {
+    fn serialize<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_all(self.0.as_bytes())
+    }
+}
+
+impl BorshDeserialize for Address {
+    fn deserialize(buf: &mut &[u8]) -> io::Result<Self> {
+        if buf.len() < 20 {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "ETH_WRONG_ADDRESS_LENGTH",
+            ));
+        }
+        // Guaranty no panics. The length checked early
+        let address = Self(primitive_types::H160::from_slice(&buf[..20]));
+        *buf = &buf[20..];
+        Ok(address)
+    }
 }
 
 pub(crate) async fn collect_aurora(
@@ -251,64 +288,20 @@ async fn process_aurora_functions(
     }
 
     if method_name == "withdraw" {
-        // withdraw does not provide any info at all
-        // https://explorer.near.org/transactions/361jK9UfCB3Nc4Qq7aejuJCXKR4er9CUDk4ZNgcv5XVx#HshJPoArD42ejfayZSQ6Cem5EXxXYffrNu5MF3h1Kkkw
-        // So we just have to make RPC call and ask for the new balance here
+        let args = WithdrawCallArgs::try_from_slice(&decoded_args)?;
+        let negative_delta =
+            BigDecimal::from_str(&args.amount.to_string())?.mul(BigDecimal::from(-1));
+        let base =
+            db_adapters::get_base(Event::Aurora, shard_id, events.len(), outcome, block_header)?;
+        let custom = coin::FtEvent {
+            affected_id: outcome.receipt.predecessor_id.clone(),
+            involved_id: None,
+            delta: negative_delta,
+            cause: "BURN".to_string(),
+            memo: None,
+        };
+        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
 
-        // Here could be the issue that we have several balance changing receipts in one block,
-        // and RPC will include the changes from the other receipts here as well
-        // I'm not handling this
-
-        // This is real right prev_balance taken from cache or from RPC at previous block
-        let prev_balance = balance_utils::get_balance(
-            crate::AccountWithContract {
-                account_id: outcome.receipt.predecessor_id.clone(),
-                contract_account_id: AccountId::from_str("aurora")?,
-            },
-            &block_header.prev_hash,
-            cache,
-            json_rpc_client,
-        )
-        .await?;
-
-        // This is the balance by the end of the block. Could contain other operations
-        let new_balance = balance_utils::get_balance_from_rpc_retriable(
-            json_rpc_client,
-            &block_header.hash,
-            AccountId::from_str("aurora")?,
-            outcome.receipt.predecessor_id.as_str(),
-        )
-        .await?;
-
-        if prev_balance < new_balance {
-            anyhow::bail!(
-                "aurora: {} balance increased during BURN: was {}, now it's {}",
-                outcome.receipt.predecessor_id,
-                prev_balance,
-                new_balance
-            )
-        }
-
-        if prev_balance != new_balance {
-            let negative_delta = BigDecimal::from_str(&(prev_balance - new_balance).to_string())?
-                .mul(BigDecimal::from(-1));
-            let base = db_adapters::get_base(
-                Event::Aurora,
-                shard_id,
-                events.len(),
-                outcome,
-                block_header,
-            )?;
-            let custom = coin::FtEvent {
-                affected_id: outcome.receipt.predecessor_id.clone(),
-                involved_id: None,
-                delta: negative_delta,
-                cause: "BURN".to_string(),
-                memo: None,
-            };
-            events
-                .push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
-        }
         return Ok(());
     }
 

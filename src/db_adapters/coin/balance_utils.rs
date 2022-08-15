@@ -66,7 +66,7 @@ async fn save_latest_balance(
     drop(balances_cache_lock);
 }
 
-pub(crate) async fn get_balance(
+async fn get_balance(
     account_with_contract: crate::AccountWithContract,
     block_hash: &near_indexer_primitives::CryptoHash,
     ft_balance_cache: &crate::FtBalanceCache,
@@ -84,7 +84,7 @@ pub(crate) async fn get_balance(
     .await
 }
 
-pub(crate) async fn get_balance_from_rpc_retriable(
+async fn get_balance_from_rpc_retriable(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     block_hash: &near_indexer_primitives::CryptoHash,
     contract_id: near_primitives::types::AccountId,
