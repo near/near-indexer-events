@@ -16,6 +16,7 @@ pub(crate) enum Event {
     Nep171,
     Aurora,
     RainbowBridge,
+    Skyward,
     TknNear,
     Wentokensir,
     WrapNear,
@@ -80,6 +81,7 @@ fn compose_db_index(
         Event::Wentokensir => 5,
         Event::WrapNear => 6,
         Event::Aurora => 7,
+        Event::Skyward => 8,
     };
     let db_index: u128 = timestamp_millis * 100_000_000_000 * 100_000_000_000
         + (*shard_id as u128) * 10_000_000

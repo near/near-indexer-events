@@ -87,6 +87,13 @@ async fn collect_ft_for_shard(
         &streamer_message.block.header,
         ft_balance_cache,
     );
+    let skyward_future = legacy::collect_skyward(
+        json_rpc_client,
+        &shard.shard_id,
+        &shard.receipt_execution_outcomes,
+        &streamer_message.block.header,
+        ft_balance_cache,
+    );
     let tkn_near_future = legacy::collect_tkn_near(
         json_rpc_client,
         &shard.shard_id,
@@ -113,6 +120,7 @@ async fn collect_ft_for_shard(
         nep141_events,
         aurora_events,
         rainbow_bridge_events,
+        skyward_events,
         tkn_near_events,
         wentokensir_events,
         wrap_near_events,
@@ -120,6 +128,7 @@ async fn collect_ft_for_shard(
         nep141_future,
         aurora_future,
         rainbow_bridge_future,
+        skyward_future,
         tkn_near_future,
         wentokensir_future,
         wrap_near_future
@@ -128,6 +137,7 @@ async fn collect_ft_for_shard(
     events.extend(nep141_events);
     events.extend(aurora_events);
     events.extend(rainbow_bridge_events);
+    events.extend(skyward_events);
     events.extend(tkn_near_events);
     events.extend(wentokensir_events);
     events.extend(wrap_near_events);
