@@ -50,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
     let json_rpc_client = near_jsonrpc_client::JsonRpcClient::connect(&opts.near_archival_rpc_url);
 
     // We want to prevent unnecessary RPC queries to find previous balance
+    // It's also required because we can't query balance in the middle of the block
     let ft_balance_cache: FtBalanceCache =
         std::sync::Arc::new(Mutex::new(SizedCache::with_size(100_000)));
 

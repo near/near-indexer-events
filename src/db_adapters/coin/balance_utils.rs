@@ -56,7 +56,7 @@ pub(crate) async fn update_cache_and_get_balance(
     Ok(absolute_amount)
 }
 
-async fn save_latest_balance(
+pub(crate) async fn save_latest_balance(
     account_with_contract: crate::AccountWithContract,
     balance: near_indexer_primitives::types::Balance,
     ft_balance_cache: &crate::FtBalanceCache,

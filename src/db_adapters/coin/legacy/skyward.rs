@@ -32,12 +32,7 @@ struct FtRefund {
     pub memo: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
-struct NearWithdraw {
-    pub amount: String,
-}
-
-pub(crate) async fn collect_tkn_near(
+pub(crate) async fn collect_skyward(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     shard_id: &near_indexer_primitives::types::ShardId,
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
@@ -47,14 +42,15 @@ pub(crate) async fn collect_tkn_near(
     let mut events: Vec<CoinEvent> = vec![];
 
     for outcome in receipt_execution_outcomes {
-        if !is_tkn_near_contract(outcome.execution_outcome.outcome.executor_id.as_str())
+        if outcome.execution_outcome.outcome.executor_id
+            != AccountId::from_str("token.skyward.near")?
             || !db_adapters::events::extract_events(outcome).is_empty()
         {
             continue;
         }
         if let ReceiptEnumView::Action { actions, .. } = &outcome.receipt.receipt {
             for action in actions {
-                process_tkn_near_functions(
+                process_skyward_functions(
                     &mut events,
                     json_rpc_client,
                     shard_id,
@@ -70,18 +66,7 @@ pub(crate) async fn collect_tkn_near(
     Ok(events)
 }
 
-fn is_tkn_near_contract(contract_id: &str) -> bool {
-    if let Some(contract_prefix) = contract_id.strip_suffix(".tkn.near") {
-        lazy_static::lazy_static! {
-            static ref RE: regex::Regex = regex::Regex::new(r"^[a-z0-9\-]+$").unwrap();
-        }
-        RE.is_match(contract_prefix)
-    } else {
-        false
-    }
-}
-
-async fn process_tkn_near_functions(
+async fn process_skyward_functions(
     events: &mut Vec<CoinEvent>,
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     shard_id: &near_indexer_primitives::types::ShardId,
@@ -90,13 +75,10 @@ async fn process_tkn_near_functions(
     action: &ActionView,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
 ) -> anyhow::Result<()> {
-    let (method_name, args, deposit) = match action {
+    let (method_name, args) = match action {
         ActionView::FunctionCall {
-            method_name,
-            args,
-            deposit,
-            ..
-        } => (method_name, args, deposit),
+            method_name, args, ..
+        } => (method_name, args),
         _ => return Ok(()),
     };
 
@@ -133,7 +115,7 @@ async fn process_tkn_near_functions(
 
         let delta = BigDecimal::from_str(&args.total_supply)?;
         let base = db_adapters::get_base(
-            Event::TknNear,
+            Event::Skyward,
             shard_id,
             events.len(),
             outcome,
@@ -150,26 +132,7 @@ async fn process_tkn_near_functions(
         return Ok(());
     }
 
-    // MINT produces 1 event, where involved_account_id is NULL.
-    if method_name == "near_deposit" {
-        let delta = BigDecimal::from_str(&deposit.to_string())?;
-        let base = db_adapters::get_base(
-            Event::TknNear,
-            shard_id,
-            events.len(),
-            outcome,
-            block_header,
-        )?;
-        let custom = coin::FtEvent {
-            affected_id: outcome.receipt.predecessor_id.clone(),
-            involved_id: None,
-            delta,
-            cause: "MINT".to_string(),
-            memo: None,
-        };
-        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
-        return Ok(());
-    }
+    // no examples of MINT calls except `new`
 
     // TRANSFER produces 2 events
     // 1. affected_account_id is sender, delta is negative, absolute_amount decreased
@@ -197,7 +160,7 @@ async fn process_tkn_near_functions(
             .map(|s| s.escape_default().to_string());
 
         let base = db_adapters::get_base(
-            Event::TknNear,
+            Event::Skyward,
             shard_id,
             events.len(),
             outcome,
@@ -213,7 +176,7 @@ async fn process_tkn_near_functions(
         events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
 
         let base = db_adapters::get_base(
-            Event::TknNear,
+            Event::Skyward,
             shard_id,
             events.len(),
             outcome,
@@ -276,7 +239,7 @@ async fn process_tkn_near_functions(
 
                 // we should revert ft_transfer_call, but there's no receiver_id. We should burn tokens
                 let base = db_adapters::get_base(
-                    Event::TknNear,
+                    Event::Skyward,
                     shard_id,
                     events.len(),
                     outcome,
@@ -297,7 +260,7 @@ async fn process_tkn_near_functions(
             if log.starts_with("Refund ") {
                 // we should revert ft_transfer_call
                 let base = db_adapters::get_base(
-                    Event::TknNear,
+                    Event::Skyward,
                     shard_id,
                     events.len(),
                     outcome,
@@ -315,7 +278,7 @@ async fn process_tkn_near_functions(
                 );
 
                 let base = db_adapters::get_base(
-                    Event::TknNear,
+                    Event::Skyward,
                     shard_id,
                     events.len(),
                     outcome,
@@ -337,41 +300,7 @@ async fn process_tkn_near_functions(
         return Ok(());
     }
 
-    // BURN produces 1 event, where involved_account_id is NULL
-    // I've seen no burn events, but if someone calls it, it should be like this
-    if method_name == "near_withdraw" {
-        let ft_burn_args = match serde_json::from_slice::<NearWithdraw>(&decoded_args) {
-            Ok(x) => x,
-            Err(err) => {
-                match outcome.execution_outcome.outcome.status {
-                    // We couldn't parse args for failed receipt. Let's just ignore it, we can't save it properly
-                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => return Ok(()),
-                    ExecutionStatusView::SuccessValue(_)
-                    | ExecutionStatusView::SuccessReceiptId(_) => {
-                        anyhow::bail!(err)
-                    }
-                }
-            }
-        };
-        let negative_delta = BigDecimal::from_str(&ft_burn_args.amount)?.mul(BigDecimal::from(-1));
-
-        let base = db_adapters::get_base(
-            Event::TknNear,
-            shard_id,
-            events.len(),
-            outcome,
-            block_header,
-        )?;
-        let custom = coin::FtEvent {
-            affected_id: outcome.receipt.predecessor_id.clone(),
-            involved_id: None,
-            delta: negative_delta,
-            cause: "BURN".to_string(),
-            memo: None,
-        };
-        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
-        return Ok(());
-    }
+    // no examples of BURN calls
 
     tracing::error!(
         target: crate::INDEXER,
