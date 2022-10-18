@@ -1,6 +1,6 @@
-use std::fmt::Write;
-
 use futures::future::try_join_all;
+use sqlx::Arguments;
+use std::fmt::Write;
 
 pub use indexer_accounts::FieldCount;
 
@@ -73,13 +73,12 @@ async fn insert_retry_or_panic<T: SqlMethods + std::fmt::Debug>(
     Ok(())
 }
 
-// todo it would be great to control how many lines we've updated in the end
-pub(crate) async fn update_retry_or_panic<T: SqlMethods + std::fmt::Debug>(
+pub(crate) async fn select_retry_or_panic(
     pool: &sqlx::Pool<sqlx::Postgres>,
     query: &str,
-    item: &T,
+    substitution_items: &[String],
     retry_count: usize,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<sqlx::postgres::PgRow>> {
     let mut interval = crate::INTERVAL;
     let mut retry_attempt = 0usize;
 
@@ -93,18 +92,21 @@ pub(crate) async fn update_retry_or_panic<T: SqlMethods + std::fmt::Debug>(
         retry_attempt += 1;
 
         let mut args = sqlx::postgres::PgArguments::default();
-        item.add_to_args(&mut args);
+        for item in substitution_items {
+            args.add(item);
+        }
 
-        match sqlx::query_with(query, args).execute(pool).await {
-            Ok(_) => break,
+        match sqlx::query_with(query, args).fetch_all(pool).await {
+            Ok(res) => return Ok(res),
             Err(async_error) => {
-                eprintln!(
-                        "Error occurred during {}:\n{} were not updated. \n{:#?} \n Retrying in {} milliseconds...",
-                        async_error,
-                        &T::name(),
-                        &item,
-                        interval.as_millis(),
-                    );
+                // todo we print here select with non-filled placeholders. It would be better to get the final select statement here
+                tracing::warn!(
+                    target: crate::LOGGING_PREFIX,
+                         "Error occurred during {}:\nFailed SELECT:\n{}\n Retrying in {} milliseconds...",
+                         async_error,
+                    query,
+                         interval.as_millis(),
+                     );
                 tokio::time::sleep(interval).await;
                 if interval < crate::MAX_DELAY_TIME {
                     interval *= 2;
@@ -112,8 +114,6 @@ pub(crate) async fn update_retry_or_panic<T: SqlMethods + std::fmt::Debug>(
             }
         }
     }
-
-    Ok(())
 }
 
 // Generates `($1, $2), ($3, $4)`

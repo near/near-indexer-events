@@ -1,3 +1,5 @@
+use crate::db_adapters::coin::{FT, FT_LEGACY};
+use crate::db_adapters::nft::NFT;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
 use near_lake_framework::near_indexer_primitives::views::ExecutionStatusView;
@@ -24,8 +26,9 @@ pub(crate) enum Event {
 }
 
 pub(crate) struct EventBase {
-    pub event_index: BigDecimal,
+    pub standard: String,
     pub receipt_id: String,
+    pub block_height: BigDecimal,
     pub block_timestamp: BigDecimal,
     pub contract_account_id: near_primitives::types::AccountId,
     pub status: ExecutionStatusView,
@@ -33,23 +36,31 @@ pub(crate) struct EventBase {
 
 pub(crate) fn get_base(
     event_type: Event,
-    shard_id: &near_indexer_primitives::types::ShardId,
-    starting_index: usize,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
     block_header: &near_indexer_primitives::views::BlockHeaderView,
 ) -> anyhow::Result<EventBase> {
     Ok(EventBase {
-        event_index: compose_db_index(
-            block_header.timestamp,
-            shard_id,
-            event_type,
-            starting_index,
-        )?,
+        standard: get_standard(&event_type),
         receipt_id: outcome.receipt.receipt_id.to_string(),
+        block_height: BigDecimal::from(block_header.height),
         block_timestamp: BigDecimal::from(block_header.timestamp),
         contract_account_id: outcome.execution_outcome.outcome.executor_id.clone(),
         status: outcome.execution_outcome.outcome.status.clone(),
     })
+}
+
+fn get_standard(event_type: &Event) -> String {
+    match event_type {
+        Event::Nep141 => FT,
+        Event::Nep171 => NFT,
+        Event::Aurora => FT_LEGACY,
+        Event::RainbowBridge => FT_LEGACY,
+        Event::Skyward => FT_LEGACY,
+        Event::TknNear => FT_LEGACY,
+        Event::Wentokensir => FT_LEGACY,
+        Event::WrapNear => FT_LEGACY,
+    }
+    .to_string()
 }
 
 fn get_status(status: &ExecutionStatusView) -> String {
@@ -71,12 +82,10 @@ fn get_status(status: &ExecutionStatusView) -> String {
 fn compose_db_index(
     block_timestamp: u64,
     shard_id: &near_primitives::types::ShardId,
-    event: Event,
+    event: &Event,
     event_index: usize,
 ) -> anyhow::Result<BigDecimal> {
     let timestamp_millis: u128 = (block_timestamp as u128) / 1_000_000;
-    // maybe it's better to have here 141, 171, but in this case we will not use most of the numbers and overflow our formula
-    // we decided to have mac type index 10_000
     let event_type_index: u128 = match event {
         Event::Nep141 => 1,
         Event::Nep171 => 2,

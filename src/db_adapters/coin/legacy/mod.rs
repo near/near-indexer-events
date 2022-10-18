@@ -1,3 +1,4 @@
+use crate::db_adapters::contracts;
 use crate::models::coin_events::CoinEvent;
 use futures::try_join;
 use near_lake_framework::near_indexer_primitives;
@@ -15,7 +16,7 @@ pub(crate) async fn collect_legacy(
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &crate::ActiveContracts,
+    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let mut events: Vec<CoinEvent> = vec![];
 

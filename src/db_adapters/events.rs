@@ -8,7 +8,7 @@ pub(crate) async fn store_events(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     streamer_message: &near_indexer_primitives::StreamerMessage,
     ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &crate::ActiveContracts,
+    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<()> {
     try_join!(
         coin::store_ft(
@@ -20,7 +20,7 @@ pub(crate) async fn store_events(
         ),
         nft::store_nft(pool, streamer_message, contracts),
     )?;
-    contracts::update_contracts(pool, contracts).await?;
+    contracts.update_db(pool).await?;
     Ok(())
 }
 

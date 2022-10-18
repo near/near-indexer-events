@@ -1,7 +1,5 @@
 use crate::db_adapters;
-use crate::db_adapters::coin::FT_LEGACY;
-use crate::db_adapters::Event;
-use crate::db_adapters::{coin, contracts};
+use crate::db_adapters::{coin, contracts, Event};
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
@@ -45,37 +43,45 @@ pub(crate) async fn collect_rainbow_bridge(
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &crate::ActiveContracts,
+    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let mut events: Vec<CoinEvent> = vec![];
 
     for outcome in receipt_execution_outcomes {
         if !is_rainbow_bridge_contract(outcome.receipt.receiver_id.as_str())
             || !db_adapters::events::extract_events(outcome).is_empty()
-            || contracts::check_contract_state(
-                &outcome.receipt.receiver_id,
-                FT_LEGACY,
-                block_header,
-                contracts,
-            )
-            .await?
+            || contracts
+                .is_contract_inconsistent(&outcome.receipt.receiver_id)
+                .await
         {
             continue;
         }
         if let ReceiptEnumView::Action { actions, .. } = &outcome.receipt.receipt {
             for action in actions {
-                process_rainbow_bridge_functions(
-                    &mut events,
-                    json_rpc_client,
-                    shard_id,
-                    block_header,
-                    ft_balance_cache,
-                    action,
-                    outcome,
-                )
-                .await?;
+                events.extend(
+                    process_rainbow_bridge_functions(
+                        json_rpc_client,
+                        block_header,
+                        ft_balance_cache,
+                        action,
+                        outcome,
+                    )
+                    .await?,
+                );
             }
         }
+    }
+
+    if !events.is_empty() {
+        coin::register_new_contracts(&mut events, contracts).await?;
+        coin::filter_inconsistent_events(&mut events, json_rpc_client, block_header, contracts)
+            .await?;
+        coin::enumerate_events(
+            &mut events,
+            shard_id,
+            block_header.timestamp,
+            &Event::RainbowBridge,
+        )?;
     }
     Ok(events)
 }
@@ -92,14 +98,12 @@ fn is_rainbow_bridge_contract(contract_id: &str) -> bool {
 }
 
 async fn process_rainbow_bridge_functions(
-    events: &mut Vec<CoinEvent>,
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
-    shard_id: &near_indexer_primitives::types::ShardId,
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     cache: &crate::FtBalanceCache,
     action: &ActionView,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<CoinEvent>> {
     let (method_name, args, ..) = match action {
         ActionView::FunctionCall {
             method_name,
@@ -107,14 +111,14 @@ async fn process_rainbow_bridge_functions(
             deposit,
             ..
         } => (method_name, args, deposit),
-        _ => return Ok(()),
+        _ => return Ok(vec![]),
     };
 
     let decoded_args = base64::decode(args)?;
 
     if vec!["storage_deposit", "finish_deposit", "verify_log_entry"].contains(&method_name.as_str())
     {
-        return Ok(());
+        return Ok(vec![]);
     }
 
     // MINT produces 1 event, where involved_account_id is NULL
@@ -124,7 +128,9 @@ async fn process_rainbow_bridge_functions(
             Err(err) => {
                 match outcome.execution_outcome.outcome.status {
                     // We couldn't parse args for failed receipt. Let's just ignore it, we can't save it properly
-                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => return Ok(()),
+                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => {
+                        return Ok(vec![])
+                    }
                     ExecutionStatusView::SuccessValue(_)
                     | ExecutionStatusView::SuccessReceiptId(_) => {
                         anyhow::bail!(err)
@@ -133,13 +139,7 @@ async fn process_rainbow_bridge_functions(
             }
         };
         let delta = BigDecimal::from_str(&mint_args.amount)?;
-        let base = db_adapters::get_base(
-            Event::RainbowBridge,
-            shard_id,
-            events.len(),
-            outcome,
-            block_header,
-        )?;
+        let base = db_adapters::get_base(Event::RainbowBridge, outcome, block_header)?;
         let custom = coin::FtEvent {
             // We can't use here outcome.receipt.predecessor_id, it's usually factory.bridge.near
             affected_id: mint_args.account_id.clone(),
@@ -148,8 +148,9 @@ async fn process_rainbow_bridge_functions(
             cause: "MINT".to_string(),
             memo: None,
         };
-        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
-        return Ok(());
+        return Ok(vec![
+            coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
+        ]);
     }
 
     // TRANSFER produces 2 events
@@ -161,7 +162,9 @@ async fn process_rainbow_bridge_functions(
             Err(err) => {
                 match outcome.execution_outcome.outcome.status {
                     // We couldn't parse args for failed receipt. Let's just ignore it, we can't save it properly
-                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => return Ok(()),
+                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => {
+                        return Ok(vec![])
+                    }
                     ExecutionStatusView::SuccessValue(_)
                     | ExecutionStatusView::SuccessReceiptId(_) => {
                         anyhow::bail!(err)
@@ -177,52 +180,43 @@ async fn process_rainbow_bridge_functions(
             .as_ref()
             .map(|s| s.escape_default().to_string());
 
-        let base = db_adapters::get_base(
-            Event::RainbowBridge,
-            shard_id,
-            events.len(),
-            outcome,
-            block_header,
-        )?;
-        let custom = coin::FtEvent {
+        let base_from = db_adapters::get_base(Event::RainbowBridge, outcome, block_header)?;
+        let custom_from = coin::FtEvent {
             affected_id: outcome.receipt.predecessor_id.clone(),
             involved_id: Some(ft_transfer_args.receiver_id.clone()),
             delta: negative_delta,
             cause: "TRANSFER".to_string(),
             memo: memo.clone(),
         };
-        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
 
-        let base = db_adapters::get_base(
-            Event::RainbowBridge,
-            shard_id,
-            events.len(),
-            outcome,
-            block_header,
-        )?;
-        let custom = coin::FtEvent {
+        let base_to = db_adapters::get_base(Event::RainbowBridge, outcome, block_header)?;
+        let custom_to = coin::FtEvent {
             affected_id: ft_transfer_args.receiver_id,
             involved_id: Some(outcome.receipt.predecessor_id.clone()),
             delta,
             cause: "TRANSFER".to_string(),
             memo,
         };
-        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
-        return Ok(());
+        return Ok(vec![
+            coin::build_event(json_rpc_client, cache, block_header, base_from, custom_from).await?,
+            coin::build_event(json_rpc_client, cache, block_header, base_to, custom_to).await?,
+        ]);
     }
 
     // If TRANSFER failed, it could be revoked. The procedure is the same as for TRANSFER
     if method_name == "ft_resolve_transfer" {
         if outcome.execution_outcome.outcome.logs.is_empty() {
             // ft_transfer_call was successful, there's nothing to return back
-            return Ok(());
+            return Ok(vec![]);
         }
         let ft_refund_args = match serde_json::from_slice::<FtRefund>(&decoded_args) {
             Ok(x) => x,
             Err(err) => {
                 match outcome.execution_outcome.outcome.status {
                     // We couldn't parse args for failed receipt. Let's just ignore it, we can't save it properly
-                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => return Ok(()),
+                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => {
+                        return Ok(vec![])
+                    }
                     ExecutionStatusView::SuccessValue(_)
                     | ExecutionStatusView::SuccessReceiptId(_) => {
                         anyhow::bail!(err)
@@ -256,13 +250,7 @@ async fn process_rainbow_bridge_functions(
                 );
 
                 // we should revert ft_transfer_call, but there's no receiver_id. We should burn tokens
-                let base = db_adapters::get_base(
-                    Event::RainbowBridge,
-                    shard_id,
-                    events.len(),
-                    outcome,
-                    block_header,
-                )?;
+                let base = db_adapters::get_base(Event::RainbowBridge, outcome, block_header)?;
                 let custom = coin::FtEvent {
                     affected_id: ft_refund_args.receiver_id,
                     involved_id: None,
@@ -270,52 +258,39 @@ async fn process_rainbow_bridge_functions(
                     cause: "BURN".to_string(),
                     memo,
                 };
-                events.push(
+                return Ok(vec![
                     coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-                );
-                return Ok(());
+                ]);
             }
             if log.starts_with("Refund ") {
                 // we should revert ft_transfer_call
-                let base = db_adapters::get_base(
-                    Event::RainbowBridge,
-                    shard_id,
-                    events.len(),
-                    outcome,
-                    block_header,
-                )?;
-                let custom = coin::FtEvent {
+                let base_from = db_adapters::get_base(Event::RainbowBridge, outcome, block_header)?;
+                let custom_from = coin::FtEvent {
                     affected_id: ft_refund_args.receiver_id.clone(),
                     involved_id: Some(ft_refund_args.sender_id.clone()),
                     delta: negative_delta,
                     cause: "TRANSFER".to_string(),
                     memo: memo.clone(),
                 };
-                events.push(
-                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-                );
 
-                let base = db_adapters::get_base(
-                    Event::RainbowBridge,
-                    shard_id,
-                    events.len(),
-                    outcome,
-                    block_header,
-                )?;
-                let custom = coin::FtEvent {
+                let base_to = db_adapters::get_base(Event::RainbowBridge, outcome, block_header)?;
+                let custom_to = coin::FtEvent {
                     affected_id: ft_refund_args.sender_id,
                     involved_id: Some(ft_refund_args.receiver_id),
                     delta,
                     cause: "TRANSFER".to_string(),
                     memo,
                 };
-                events.push(
-                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
-                );
-                return Ok(());
+
+                return Ok(vec![
+                    coin::build_event(json_rpc_client, cache, block_header, base_from, custom_from)
+                        .await?,
+                    coin::build_event(json_rpc_client, cache, block_header, base_to, custom_to)
+                        .await?,
+                ]);
             }
         }
-        return Ok(());
+        return Ok(vec![]);
     }
 
     // BURN produces 1 event, where involved_account_id is NULL
@@ -325,7 +300,9 @@ async fn process_rainbow_bridge_functions(
             Err(err) => {
                 match outcome.execution_outcome.outcome.status {
                     // We couldn't parse args for failed receipt. Let's just ignore it, we can't save it properly
-                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => return Ok(()),
+                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => {
+                        return Ok(vec![])
+                    }
                     ExecutionStatusView::SuccessValue(_)
                     | ExecutionStatusView::SuccessReceiptId(_) => {
                         anyhow::bail!(err)
@@ -335,13 +312,7 @@ async fn process_rainbow_bridge_functions(
         };
         let negative_delta = BigDecimal::from_str(&ft_burn_args.amount)?.mul(BigDecimal::from(-1));
 
-        let base = db_adapters::get_base(
-            Event::RainbowBridge,
-            shard_id,
-            events.len(),
-            outcome,
-            block_header,
-        )?;
+        let base = db_adapters::get_base(Event::RainbowBridge, outcome, block_header)?;
         let custom = coin::FtEvent {
             affected_id: outcome.receipt.predecessor_id.clone(),
             involved_id: None,
@@ -349,15 +320,16 @@ async fn process_rainbow_bridge_functions(
             cause: "BURN".to_string(),
             memo: None,
         };
-        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
-        return Ok(());
+        return Ok(vec![
+            coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
+        ]);
     }
 
     tracing::error!(
         target: crate::LOGGING_PREFIX,
-        "{} method {}",
+        "RAINBOW {} method {}",
         block_header.height,
         method_name
     );
-    Ok(())
+    Ok(vec![])
 }
