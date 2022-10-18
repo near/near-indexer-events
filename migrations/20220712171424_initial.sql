@@ -1,6 +1,6 @@
 CREATE TABLE nft_events
 (
-    event_index                 numeric(38, 0) PRIMARY KEY,
+    event_index           numeric(38, 0) PRIMARY KEY,
     receipt_id            text           NOT NULL,
     block_timestamp       numeric(20, 0) NOT NULL,
     -- account_id of the contract itself. In a simple words, it's the owner/creator of NFT contract
@@ -33,7 +33,7 @@ ALTER TABLE nft_events
 
 CREATE TABLE coin_events
 (
-    event_index               numeric(38, 0) PRIMARY KEY,
+    event_index         numeric(38, 0) PRIMARY KEY,
     receipt_id          text           NOT NULL,
     block_timestamp     numeric(20, 0) NOT NULL,
     -- account_id of the contract itself. In a simple words, it's the owner/creator of FT contract
@@ -59,3 +59,19 @@ CREATE INDEX coin_events_affected_account_id_idx ON coin_events
 ALTER TABLE coin_events
     ADD CONSTRAINT coin_events_fk
         FOREIGN KEY (receipt_id) REFERENCES receipts (receipt_id) ON DELETE CASCADE;
+
+CREATE TABLE contracts
+(
+    contract_account_id                 text PRIMARY KEY,
+    -- FT_NEP141, FT_LEGACY, NFT_NEP171, NFT_LEGACY
+    standard                            text           NOT NULL,
+    first_event_at_timestamp            numeric(20, 0) NOT NULL,
+    first_event_at_block_height         numeric(20, 0) NOT NULL,
+
+    -- we may want to store all historical metadata, but I don't want to overcomplicate the current task
+    -- metadata                            jsonb          NOT NULL,
+    -- we also may want to store code_hash, but again it's better to do that in the other scope
+
+    inconsistency_found_at_timestamp    numeric(20, 0),
+    inconsistency_found_at_block_height numeric(20, 0)
+);

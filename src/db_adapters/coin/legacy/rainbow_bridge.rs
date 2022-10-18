@@ -1,6 +1,7 @@
 use crate::db_adapters;
-use crate::db_adapters::coin;
+use crate::db_adapters::coin::FT_LEGACY;
 use crate::db_adapters::Event;
+use crate::db_adapters::{coin, contracts};
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
@@ -44,12 +45,20 @@ pub(crate) async fn collect_rainbow_bridge(
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     ft_balance_cache: &crate::FtBalanceCache,
+    contracts: &crate::ActiveContracts,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let mut events: Vec<CoinEvent> = vec![];
 
     for outcome in receipt_execution_outcomes {
-        if !is_rainbow_bridge_contract(outcome.execution_outcome.outcome.executor_id.as_str())
+        if !is_rainbow_bridge_contract(outcome.receipt.receiver_id.as_str())
             || !db_adapters::events::extract_events(outcome).is_empty()
+            || contracts::check_contract_state(
+                &outcome.receipt.receiver_id,
+                FT_LEGACY,
+                block_header,
+                contracts,
+            )
+            .await?
         {
             continue;
         }
@@ -241,7 +250,7 @@ async fn process_rainbow_bridge_functions(
             if log == "The account of the sender was deleted" {
                 // I never met this case so it's better to re-check it manually when we find it
                 tracing::error!(
-                    target: crate::INDEXER,
+                    target: crate::LOGGING_PREFIX,
                     "The account of the sender was deleted {}",
                     block_header.height
                 );
@@ -345,7 +354,7 @@ async fn process_rainbow_bridge_functions(
     }
 
     tracing::error!(
-        target: crate::INDEXER,
+        target: crate::LOGGING_PREFIX,
         "{} method {}",
         block_header.height,
         method_name

@@ -4,6 +4,7 @@ use near_lake_framework::near_indexer_primitives::views::ExecutionStatusView;
 use std::str::FromStr;
 
 mod coin;
+pub(crate) mod contracts;
 mod event_types;
 pub(crate) mod events;
 mod nft;
@@ -27,7 +28,7 @@ pub(crate) struct EventBase {
     pub receipt_id: String,
     pub block_timestamp: BigDecimal,
     pub contract_account_id: near_primitives::types::AccountId,
-    pub status: near_primitives::views::ExecutionStatusView,
+    pub status: ExecutionStatusView,
 }
 
 pub(crate) fn get_base(
@@ -38,7 +39,7 @@ pub(crate) fn get_base(
     block_header: &near_indexer_primitives::views::BlockHeaderView,
 ) -> anyhow::Result<EventBase> {
     Ok(EventBase {
-        event_index: crate::db_adapters::compose_db_index(
+        event_index: compose_db_index(
             block_header.timestamp,
             shard_id,
             event_type,
@@ -54,7 +55,10 @@ pub(crate) fn get_base(
 fn get_status(status: &ExecutionStatusView) -> String {
     match status {
         ExecutionStatusView::Unknown => {
-            tracing::warn!(target: crate::INDEXER, "Unknown execution status view",);
+            tracing::warn!(
+                target: crate::LOGGING_PREFIX,
+                "Unknown execution status view",
+            );
             "UNKNOWN"
         }
         ExecutionStatusView::Failure(_) => "FAILURE",
@@ -76,12 +80,12 @@ fn compose_db_index(
     let event_type_index: u128 = match event {
         Event::Nep141 => 1,
         Event::Nep171 => 2,
-        Event::RainbowBridge => 3,
-        Event::TknNear => 4,
-        Event::Wentokensir => 5,
-        Event::WrapNear => 6,
-        Event::Aurora => 7,
-        Event::Skyward => 8,
+        Event::Aurora => 3,
+        Event::RainbowBridge => 4,
+        Event::Skyward => 5,
+        Event::TknNear => 6,
+        Event::Wentokensir => 7,
+        Event::WrapNear => 8,
     };
     let db_index: u128 = timestamp_millis * 100_000_000_000 * 100_000_000_000
         + (*shard_id as u128) * 10_000_000

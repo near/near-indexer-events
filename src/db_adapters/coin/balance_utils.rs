@@ -110,7 +110,7 @@ async fn get_balance_from_rpc_retriable(
             Ok(res) => return Ok(res),
             Err(err) => {
                 tracing::error!(
-                    target: crate::INDEXER,
+                    target: crate::LOGGING_PREFIX,
                     "Failed to request ft_balance_of from RPC for account {}, contract {}, block_hash {}.{}\n Retrying in {} milliseconds...",
                     account_id,
                     contract_id,

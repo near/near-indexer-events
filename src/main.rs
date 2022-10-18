@@ -3,6 +3,7 @@ use cached::SizedCache;
 use clap::Parser;
 use dotenv::dotenv;
 use futures::StreamExt;
+use std::collections::HashMap;
 use std::env;
 use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
@@ -15,9 +16,7 @@ mod db_adapters;
 mod models;
 mod rpc_helpers;
 
-// Categories for logging
-// TODO naming
-pub(crate) const INDEXER: &str = "indexer_events";
+pub(crate) const LOGGING_PREFIX: &str = "indexer_events";
 
 const INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 const MAX_DELAY_TIME: std::time::Duration = std::time::Duration::from_secs(120);
@@ -30,6 +29,9 @@ pub struct AccountWithContract {
 
 pub type FtBalanceCache =
     std::sync::Arc<Mutex<SizedCache<AccountWithContract, near_primitives::types::Balance>>>;
+// we should check how much memory we consume and maybe change the approach
+pub type ActiveContracts =
+    std::sync::Arc<Mutex<HashMap<near_primitives::types::AccountId, models::contracts::Contract>>>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -53,10 +55,18 @@ async fn main() -> anyhow::Result<()> {
     // It's also required because we can't query balance in the middle of the block
     let ft_balance_cache: FtBalanceCache =
         std::sync::Arc::new(Mutex::new(SizedCache::with_size(100_000)));
+    // We decided to ignore invalid contracts so we need to keep the cache for it
+    let contracts: ActiveContracts = std::sync::Arc::new(Mutex::new(HashMap::new()));
 
     let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
         .map(|streamer_message| {
-            handle_streamer_message(streamer_message, &pool, &json_rpc_client, &ft_balance_cache)
+            handle_streamer_message(
+                streamer_message,
+                &pool,
+                &json_rpc_client,
+                &ft_balance_cache,
+                &contracts,
+            )
         })
         .buffer_unordered(1usize);
 
@@ -90,31 +100,43 @@ async fn handle_streamer_message(
     pool: &sqlx::Pool<sqlx::Postgres>,
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     ft_balance_cache: &FtBalanceCache,
+    contracts: &ActiveContracts,
 ) -> anyhow::Result<u64> {
     if streamer_message.block.header.height % 100 == 0 {
         tracing::info!(
-            target: crate::INDEXER,
+            target: crate::LOGGING_PREFIX,
             "{} / shards {}",
             streamer_message.block.header.height,
             streamer_message.shards.len()
         );
     }
 
-    db_adapters::events::store_events(pool, json_rpc_client, &streamer_message, ft_balance_cache)
-        .await?;
+    db_adapters::events::store_events(
+        pool,
+        json_rpc_client,
+        &streamer_message,
+        ft_balance_cache,
+        contracts,
+    )
+    .await?;
+    // We don't need to update metadata each block
+    // if streamer_message.block.header.height % 1000 == 0 {
+    //     db_adapters::contracts::update_metadata(pool, json_rpc_client, &streamer_message, contracts)
+    //         .await?;
+    // }
     Ok(streamer_message.block.header.height)
 }
 
 fn init_tracing() {
     let mut env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
 
-    if let Ok(rust_log) = std::env::var("RUST_LOG") {
+    if let Ok(rust_log) = env::var("RUST_LOG") {
         if !rust_log.is_empty() {
             for directive in rust_log.split(',').filter_map(|s| match s.parse() {
                 Ok(directive) => Some(directive),
                 Err(err) => {
                     tracing::warn!(
-                        target: crate::INDEXER,
+                        target: crate::LOGGING_PREFIX,
                         "Ignoring directive `{}`: {}",
                         s,
                         err
