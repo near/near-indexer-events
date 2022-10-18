@@ -119,11 +119,6 @@ async fn handle_streamer_message(
         contracts,
     )
     .await?;
-    // We don't need to update metadata each block
-    // if streamer_message.block.header.height % 1000 == 0 {
-    //     db_adapters::contracts::update_metadata(pool, json_rpc_client, &streamer_message, contracts)
-    //         .await?;
-    // }
     Ok(streamer_message.block.header.height)
 }
 
