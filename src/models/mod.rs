@@ -5,6 +5,7 @@ use futures::future::try_join_all;
 pub use indexer_accounts::FieldCount;
 
 pub(crate) mod coin_events;
+pub(crate) mod contracts;
 pub(crate) mod nft_events;
 
 pub trait FieldCount {
@@ -55,7 +56,7 @@ async fn insert_retry_or_panic<T: SqlMethods + std::fmt::Debug>(
             Ok(_) => break,
             Err(async_error) => {
                 tracing::warn!(
-                    target: crate::INDEXER,
+                    target: crate::LOGGING_PREFIX,
                     "Error occurred during {}:\n{} were not stored. \n{:#?} \n Retrying in {} milliseconds...",
                     async_error,
                     &T::name(),
@@ -69,6 +70,49 @@ async fn insert_retry_or_panic<T: SqlMethods + std::fmt::Debug>(
             }
         }
     }
+    Ok(())
+}
+
+// todo it would be great to control how many lines we've updated in the end
+pub(crate) async fn update_retry_or_panic<T: SqlMethods + std::fmt::Debug>(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    query: &str,
+    item: &T,
+    retry_count: usize,
+) -> anyhow::Result<()> {
+    let mut interval = crate::INTERVAL;
+    let mut retry_attempt = 0usize;
+
+    loop {
+        if retry_attempt == retry_count {
+            return Err(anyhow::anyhow!(
+                "Failed to perform query to database after {} attempts. Stop trying.",
+                retry_count
+            ));
+        }
+        retry_attempt += 1;
+
+        let mut args = sqlx::postgres::PgArguments::default();
+        item.add_to_args(&mut args);
+
+        match sqlx::query_with(query, args).execute(pool).await {
+            Ok(_) => break,
+            Err(async_error) => {
+                eprintln!(
+                        "Error occurred during {}:\n{} were not updated. \n{:#?} \n Retrying in {} milliseconds...",
+                        async_error,
+                        &T::name(),
+                        &item,
+                        interval.as_millis(),
+                    );
+                tokio::time::sleep(interval).await;
+                if interval < crate::MAX_DELAY_TIME {
+                    interval *= 2;
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 

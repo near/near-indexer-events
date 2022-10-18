@@ -1,20 +1,32 @@
 use bigdecimal::BigDecimal;
 
 use crate::db_adapters::event_types::Nep171Event;
-use crate::db_adapters::Event;
 use crate::db_adapters::{compose_db_index, get_status};
+use crate::db_adapters::{contracts, Event};
 use crate::models::nft_events::NftEvent;
 use near_lake_framework::near_indexer_primitives;
 
 use crate::db_adapters::event_types;
+use crate::db_adapters::nft::NFT;
 
-pub(crate) async fn store_nft_events(
+pub(crate) async fn collect_nep171_events(
     shard_id: &near_indexer_primitives::types::ShardId,
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
+    contracts: &crate::ActiveContracts,
 ) -> anyhow::Result<Vec<NftEvent>> {
     let mut res = Vec::new();
     for outcome in receipt_execution_outcomes {
+        if contracts::check_contract_state(
+            &outcome.receipt.receiver_id,
+            NFT,
+            block_header,
+            contracts,
+        )
+        .await?
+        {
+            continue;
+        }
         for events in crate::db_adapters::events::extract_events(outcome) {
             if let event_types::NearEvent::Nep171(nft_events) = events {
                 compose_nft_db_events(

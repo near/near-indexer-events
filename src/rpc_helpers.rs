@@ -25,7 +25,7 @@ pub(crate) async fn wrapped_call(
     contract_id: &near_primitives::types::AccountId,
 ) -> anyhow::Result<near_primitives::views::CallResult> {
     tracing::info!(
-        target: crate::INDEXER,
+        target: crate::LOGGING_PREFIX,
         "RPC request: {:?}\nTo contract:{}, block {}",
         request,
         contract_id,

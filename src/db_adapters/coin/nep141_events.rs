@@ -1,13 +1,13 @@
 use crate::db_adapters::event_types::Nep141Event;
-use crate::db_adapters::Event;
 use crate::db_adapters::{compose_db_index, get_status};
+use crate::db_adapters::{contracts, Event};
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
 use std::ops::Mul;
 use std::str::FromStr;
 
-use crate::db_adapters::coin::balance_utils;
+use crate::db_adapters::coin::{balance_utils, FT};
 use crate::db_adapters::event_types;
 
 pub(crate) async fn collect_nep141_events(
@@ -16,9 +16,20 @@ pub(crate) async fn collect_nep141_events(
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     ft_balance_cache: &crate::FtBalanceCache,
+    contracts: &crate::ActiveContracts,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let mut res = Vec::new();
     for outcome in receipt_execution_outcomes {
+        if contracts::check_contract_state(
+            &outcome.receipt.receiver_id,
+            FT,
+            block_header,
+            contracts,
+        )
+        .await?
+        {
+            continue;
+        }
         for events in crate::db_adapters::events::extract_events(outcome) {
             if let event_types::NearEvent::Nep141(ft_events) = events {
                 compose_events_for_db(

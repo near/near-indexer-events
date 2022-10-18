@@ -1,6 +1,7 @@
 use crate::db_adapters;
-use crate::db_adapters::coin;
+use crate::db_adapters::coin::FT_LEGACY;
 use crate::db_adapters::Event;
+use crate::db_adapters::{coin, contracts};
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
@@ -61,11 +62,22 @@ pub(crate) async fn collect_aurora(
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     ft_balance_cache: &crate::FtBalanceCache,
+    contracts: &crate::ActiveContracts,
 ) -> anyhow::Result<Vec<CoinEvent>> {
+    if contracts::check_contract_state(
+        &AccountId::from_str("aurora")?,
+        FT_LEGACY,
+        block_header,
+        contracts,
+    )
+    .await?
+    {
+        return Ok(vec![]);
+    }
     let mut events: Vec<CoinEvent> = vec![];
 
     for outcome in receipt_execution_outcomes {
-        if outcome.execution_outcome.outcome.executor_id != AccountId::from_str("aurora")?
+        if outcome.receipt.receiver_id != AccountId::from_str("aurora")?
             || !db_adapters::events::extract_events(outcome).is_empty()
         {
             continue;
@@ -306,7 +318,7 @@ async fn process_aurora_functions(
     }
 
     tracing::error!(
-        target: crate::INDEXER,
+        target: crate::LOGGING_PREFIX,
         "{} method {}, receipt {}",
         block_header.height,
         method_name,
