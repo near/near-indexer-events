@@ -1,7 +1,9 @@
 CREATE TABLE nft_events
 (
     event_index           numeric(38, 0) PRIMARY KEY,
+    standard              text           NOT NULL,
     receipt_id            text           NOT NULL,
+    block_height          numeric(20, 0) NOT NULL,
     block_timestamp       numeric(20, 0) NOT NULL,
     -- account_id of the contract itself. In a simple words, it's the owner/creator of NFT contract
     contract_account_id   text           NOT NULL,
@@ -34,7 +36,9 @@ ALTER TABLE nft_events
 CREATE TABLE coin_events
 (
     event_index         numeric(38, 0) PRIMARY KEY,
+    standard            text           NOT NULL,
     receipt_id          text           NOT NULL,
+    block_height        numeric(20, 0) NOT NULL,
     block_timestamp     numeric(20, 0) NOT NULL,
     -- account_id of the contract itself. In a simple words, it's the owner/creator of FT contract
     contract_account_id text           NOT NULL,
@@ -42,7 +46,6 @@ CREATE TABLE coin_events
     involved_account_id text,
     delta_amount        numeric(38, 0) NOT NULL,
     absolute_amount     numeric(38, 0) NOT NULL,
---     standard            text           NOT NULL,
 --     coin_id             text           NOT NULL,
     cause               text           NOT NULL,
     status              text           NOT NULL,

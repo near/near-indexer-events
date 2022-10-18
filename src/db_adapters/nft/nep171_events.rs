@@ -1,10 +1,11 @@
 use bigdecimal::BigDecimal;
 
 use crate::db_adapters::event_types::Nep171Event;
-use crate::db_adapters::{compose_db_index, get_status};
 use crate::db_adapters::{contracts, Event};
+use crate::db_adapters::{events, get_status, nft};
 use crate::models::nft_events::NftEvent;
 use near_lake_framework::near_indexer_primitives;
+use num_traits::Zero;
 
 use crate::db_adapters::event_types;
 use crate::db_adapters::nft::NFT;
@@ -13,56 +14,49 @@ pub(crate) async fn collect_nep171_events(
     shard_id: &near_indexer_primitives::types::ShardId,
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    contracts: &crate::ActiveContracts,
+    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<NftEvent>> {
     let mut res = Vec::new();
     for outcome in receipt_execution_outcomes {
-        if contracts::check_contract_state(
-            &outcome.receipt.receiver_id,
-            NFT,
-            block_header,
-            contracts,
-        )
-        .await?
+        let events = events::extract_events(outcome);
+        if !events.is_empty()
+            && contracts
+                .is_contract_inconsistent(&outcome.receipt.receiver_id)
+                .await
         {
             continue;
         }
-        for events in crate::db_adapters::events::extract_events(outcome) {
-            if let event_types::NearEvent::Nep171(nft_events) = events {
-                compose_nft_db_events(
-                    &mut res,
-                    &nft_events,
-                    outcome,
-                    block_header.timestamp,
-                    shard_id,
-                )?;
+
+        for event in events {
+            if let event_types::NearEvent::Nep171(nft_events) = event {
+                compose_nft_db_events(&nft_events, outcome, block_header)?;
             }
         }
     }
+
+    nft::register_new_contracts(&mut res, contracts).await?;
+    // filter_inconsistent_events(&mut res, json_rpc_client, contracts).await?;
+    nft::enumerate_events(&mut res, shard_id, block_header.timestamp, &Event::Nep171)?;
     Ok(res)
 }
 
 fn compose_nft_db_events(
-    nft_events: &mut Vec<NftEvent>,
     events: &Nep171Event,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
-    block_timestamp: u64,
-    shard_id: &near_indexer_primitives::types::ShardId,
-) -> anyhow::Result<()> {
+    block_header: &near_indexer_primitives::views::BlockHeaderView,
+) -> anyhow::Result<Vec<NftEvent>> {
+    let mut nft_events = vec![];
     let contract_id = &outcome.receipt.receiver_id;
     match &events.event_kind {
         event_types::Nep171EventKind::NftMint(mint_events) => {
             for mint_event in mint_events {
                 for token_id in &mint_event.token_ids {
                     nft_events.push(NftEvent {
-                        event_index: compose_db_index(
-                            block_timestamp,
-                            shard_id,
-                            Event::Nep171,
-                            nft_events.len(),
-                        )?,
+                        event_index: BigDecimal::zero(), // initialized later
+                        standard: NFT.to_string(),
                         receipt_id: outcome.receipt.receipt_id.to_string(),
-                        block_timestamp: BigDecimal::from(block_timestamp),
+                        block_height: BigDecimal::from(block_header.height),
+                        block_timestamp: BigDecimal::from(block_header.timestamp),
                         contract_account_id: contract_id.to_string(),
                         token_id: token_id.escape_default().to_string(),
                         cause: "MINT".to_string(),
@@ -84,14 +78,11 @@ fn compose_nft_db_events(
             for transfer_event in transfer_events {
                 for token_id in &transfer_event.token_ids {
                     nft_events.push(NftEvent {
-                        event_index: compose_db_index(
-                            block_timestamp,
-                            shard_id,
-                            Event::Nep171,
-                            nft_events.len(),
-                        )?,
+                        event_index: BigDecimal::zero(), // initialized later
+                        standard: NFT.to_string(),
                         receipt_id: outcome.receipt.receipt_id.to_string(),
-                        block_timestamp: BigDecimal::from(block_timestamp),
+                        block_height: BigDecimal::from(block_header.height),
+                        block_timestamp: BigDecimal::from(block_header.timestamp),
                         contract_account_id: contract_id.to_string(),
                         token_id: token_id.escape_default().to_string(),
                         cause: "TRANSFER".to_string(),
@@ -118,14 +109,11 @@ fn compose_nft_db_events(
             for burn_event in burn_events {
                 for token_id in &burn_event.token_ids {
                     nft_events.push(NftEvent {
-                        event_index: compose_db_index(
-                            block_timestamp,
-                            shard_id,
-                            Event::Nep171,
-                            nft_events.len(),
-                        )?,
+                        event_index: BigDecimal::zero(), // initialized later
+                        standard: NFT.to_string(),
                         receipt_id: outcome.receipt.receipt_id.to_string(),
-                        block_timestamp: BigDecimal::from(block_timestamp),
+                        block_height: BigDecimal::from(block_header.height),
+                        block_timestamp: BigDecimal::from(block_header.timestamp),
                         contract_account_id: contract_id.to_string(),
                         token_id: token_id.escape_default().to_string(),
                         cause: "BURN".to_string(),
@@ -147,5 +135,5 @@ fn compose_nft_db_events(
             }
         }
     }
-    Ok(())
+    Ok(nft_events)
 }

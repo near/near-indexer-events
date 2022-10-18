@@ -11,8 +11,6 @@ pub struct Contract {
     pub first_event_at_block_height: BigDecimal,
     pub inconsistency_found_at_timestamp: Option<BigDecimal>,
     pub inconsistency_found_at_block_height: Option<BigDecimal>,
-    // ignored by the db
-    pub should_add_to_db: bool,
 }
 
 impl crate::models::SqlMethods for Contract {
@@ -27,11 +25,12 @@ impl crate::models::SqlMethods for Contract {
 
     fn insert_query(items_count: usize) -> anyhow::Result<String> {
         Ok("INSERT INTO contracts VALUES ".to_owned()
-            // -1 because of the flag should_add_to_db
-            + &crate::models::create_placeholders(items_count, Contract::field_count() - 1)?
+            + &crate::models::create_placeholders(items_count, Contract::field_count())?
             + " ON CONFLICT (contract_account_id) DO UPDATE SET "
-            + " inconsistency_found_at_timestamp = excluded.inconsistency_found_at_timestamp, "
-            + " inconsistency_found_at_block_height = excluded.inconsistency_found_at_block_height")
+            + " first_event_at_timestamp = least(contracts.first_event_at_timestamp, excluded.first_event_at_timestamp), "
+            + " first_event_at_block_height = least(contracts.first_event_at_block_height, excluded.first_event_at_block_height), "
+            + " inconsistency_found_at_timestamp = least(contracts.inconsistency_found_at_timestamp, excluded.inconsistency_found_at_timestamp), "
+            + " inconsistency_found_at_block_height = least(contracts.inconsistency_found_at_block_height, excluded.inconsistency_found_at_block_height)")
     }
 
     fn name() -> String {

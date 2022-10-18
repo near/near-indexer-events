@@ -160,13 +160,13 @@ async fn get_balance_from_rpc(
     }
 }
 
-pub(crate) async fn check_balance(
+pub(crate) async fn is_balance_correct(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     block_header: &near_primitives::views::BlockHeaderView,
     contract_id: &str,
     account_id: &str,
     amount: &BigDecimal,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let correct_value = get_balance_from_rpc_retriable(
         json_rpc_client,
         &block_header.hash,
@@ -174,8 +174,9 @@ pub(crate) async fn check_balance(
         account_id,
     )
     .await?;
-    if correct_value != amount.to_string().parse::<u128>()? {
-        anyhow::bail!(
+    Ok(if correct_value != amount.to_string().parse::<u128>()? {
+        tracing::error!(
+            target: crate::LOGGING_PREFIX,
             "Balance is wrong for account {}, contract {}: expected {}, actual {}. Block {} {}",
             account_id,
             contract_id,
@@ -183,7 +184,9 @@ pub(crate) async fn check_balance(
             amount,
             block_header.height,
             block_header.hash,
-        )
-    }
-    Ok(())
+        );
+        false
+    } else {
+        true
+    })
 }

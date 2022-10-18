@@ -1,5 +1,4 @@
 use crate::db_adapters;
-use crate::db_adapters::coin::FT_LEGACY;
 use crate::db_adapters::Event;
 use crate::db_adapters::{coin, contracts};
 use crate::models::coin_events::CoinEvent;
@@ -62,20 +61,15 @@ pub(crate) async fn collect_aurora(
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &crate::ActiveContracts,
+    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
-    if contracts::check_contract_state(
-        &AccountId::from_str("aurora")?,
-        FT_LEGACY,
-        block_header,
-        contracts,
-    )
-    .await?
+    if contracts
+        .is_contract_inconsistent(&AccountId::from_str("aurora")?)
+        .await
     {
         return Ok(vec![]);
     }
     let mut events: Vec<CoinEvent> = vec![];
-
     for outcome in receipt_execution_outcomes {
         if outcome.receipt.receiver_id != AccountId::from_str("aurora")?
             || !db_adapters::events::extract_events(outcome).is_empty()
@@ -84,31 +78,40 @@ pub(crate) async fn collect_aurora(
         }
         if let ReceiptEnumView::Action { actions, .. } = &outcome.receipt.receipt {
             for action in actions {
-                process_aurora_functions(
-                    &mut events,
-                    json_rpc_client,
-                    shard_id,
-                    block_header,
-                    ft_balance_cache,
-                    action,
-                    outcome,
-                )
-                .await?;
+                events.extend(
+                    process_aurora_functions(
+                        json_rpc_client,
+                        block_header,
+                        ft_balance_cache,
+                        action,
+                        outcome,
+                    )
+                    .await?,
+                );
             }
         }
+    }
+    if !events.is_empty() {
+        coin::register_new_contracts(&mut events, contracts).await?;
+        coin::filter_inconsistent_events(&mut events, json_rpc_client, block_header, contracts)
+            .await?;
+        coin::enumerate_events(
+            &mut events,
+            shard_id,
+            block_header.timestamp,
+            &Event::Aurora,
+        )?;
     }
     Ok(events)
 }
 
 async fn process_aurora_functions(
-    events: &mut Vec<CoinEvent>,
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
-    shard_id: &near_indexer_primitives::types::ShardId,
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     cache: &crate::FtBalanceCache,
     action: &ActionView,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<CoinEvent>> {
     let (method_name, args, ..) = match action {
         ActionView::FunctionCall {
             method_name,
@@ -116,7 +119,7 @@ async fn process_aurora_functions(
             deposit,
             ..
         } => (method_name, args, deposit),
-        _ => return Ok(()),
+        _ => return Ok(vec![]),
     };
 
     // Note: aurora (now always, but) usually has binary args
@@ -135,12 +138,13 @@ async fn process_aurora_functions(
     ]
     .contains(&method_name.as_str())
     {
-        return Ok(());
+        return Ok(vec![]);
     }
 
     // MINT may produce several events, where involved_account_id is always NULL
     // deposit do not mint anything; mint goes in finish_deposit
     if method_name == "finish_deposit" {
+        let mut events = vec![];
         for log in &outcome.execution_outcome.outcome.logs {
             lazy_static::lazy_static! {
                 static ref RE: regex::Regex = regex::Regex::new(r"^Mint (?P<amount>(0|[1-9][0-9]*)) nETH tokens for: (?P<account_id>[a-z0-9\.\-]+)$").unwrap();
@@ -160,13 +164,7 @@ async fn process_aurora_functions(
                 };
 
                 let delta = BigDecimal::from_str(amount)?;
-                let base = db_adapters::get_base(
-                    Event::Aurora,
-                    shard_id,
-                    events.len(),
-                    outcome,
-                    block_header,
-                )?;
+                let base = db_adapters::get_base(Event::Aurora, outcome, block_header)?;
                 let custom = coin::FtEvent {
                     affected_id: AccountId::from_str(account_id)?,
                     involved_id: None,
@@ -180,7 +178,7 @@ async fn process_aurora_functions(
             };
         }
 
-        return Ok(());
+        return Ok(events);
     }
 
     // TRANSFER produces 2 events
@@ -192,7 +190,9 @@ async fn process_aurora_functions(
             Err(err) => {
                 match outcome.execution_outcome.outcome.status {
                     // We couldn't parse args for failed receipt. Let's just ignore it, we can't save it properly
-                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => return Ok(()),
+                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => {
+                        return Ok(vec![])
+                    }
                     ExecutionStatusView::SuccessValue(_)
                     | ExecutionStatusView::SuccessReceiptId(_) => {
                         anyhow::bail!(err)
@@ -208,32 +208,32 @@ async fn process_aurora_functions(
             .as_ref()
             .map(|s| s.escape_default().to_string());
 
-        let base =
-            db_adapters::get_base(Event::Aurora, shard_id, events.len(), outcome, block_header)?;
-        let custom = coin::FtEvent {
+        let base_from = db_adapters::get_base(Event::Aurora, outcome, block_header)?;
+        let custom_from = coin::FtEvent {
             affected_id: outcome.receipt.predecessor_id.clone(),
             involved_id: Some(ft_transfer_args.receiver_id.clone()),
             delta: negative_delta,
             cause: "TRANSFER".to_string(),
             memo: memo.clone(),
         };
-        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
 
-        let base =
-            db_adapters::get_base(Event::Aurora, shard_id, events.len(), outcome, block_header)?;
-        let custom = coin::FtEvent {
+        let base_to = db_adapters::get_base(Event::Aurora, outcome, block_header)?;
+        let custom_to = coin::FtEvent {
             affected_id: ft_transfer_args.receiver_id,
             involved_id: Some(outcome.receipt.predecessor_id.clone()),
             delta,
             cause: "TRANSFER".to_string(),
             memo,
         };
-        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
-        return Ok(());
+        return Ok(vec![
+            coin::build_event(json_rpc_client, cache, block_header, base_from, custom_from).await?,
+            coin::build_event(json_rpc_client, cache, block_header, base_to, custom_to).await?,
+        ]);
     }
 
     // If TRANSFER failed, it could be revoked. The procedure is the same as for TRANSFER
     if method_name == "ft_resolve_transfer" {
+        let mut events = vec![];
         for log in &outcome.execution_outcome.outcome.logs {
             lazy_static::lazy_static! {
                 static ref RE: regex::Regex = regex::Regex::new(r"^Refund amount (?P<amount>(0|[1-9][0-9]*)) from (?P<from_account_id>[a-z0-9\.\-]+) to (?P<to_account_id>[a-z0-9\.\-]+)$").unwrap();
@@ -259,14 +259,8 @@ async fn process_aurora_functions(
                 let delta = BigDecimal::from_str(amount)?;
                 let negative_delta = delta.clone().mul(BigDecimal::from(-1));
 
-                let base = db_adapters::get_base(
-                    Event::Aurora,
-                    shard_id,
-                    events.len(),
-                    outcome,
-                    block_header,
-                )?;
-                let custom = coin::FtEvent {
+                let base_from = db_adapters::get_base(Event::Aurora, outcome, block_header)?;
+                let custom_from = coin::FtEvent {
                     affected_id: AccountId::from_str(from_account_id)?,
                     involved_id: Some(AccountId::from_str(to_account_id)?),
                     delta: negative_delta,
@@ -274,17 +268,12 @@ async fn process_aurora_functions(
                     memo: None,
                 };
                 events.push(
-                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
+                    coin::build_event(json_rpc_client, cache, block_header, base_from, custom_from)
+                        .await?,
                 );
 
-                let base = db_adapters::get_base(
-                    Event::Aurora,
-                    shard_id,
-                    events.len(),
-                    outcome,
-                    block_header,
-                )?;
-                let custom = coin::FtEvent {
+                let base_to = db_adapters::get_base(Event::Aurora, outcome, block_header)?;
+                let custom_to = coin::FtEvent {
                     affected_id: AccountId::from_str(to_account_id)?,
                     involved_id: Some(AccountId::from_str(from_account_id)?),
                     delta,
@@ -292,19 +281,19 @@ async fn process_aurora_functions(
                     memo: None,
                 };
                 events.push(
-                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
+                    coin::build_event(json_rpc_client, cache, block_header, base_to, custom_to)
+                        .await?,
                 );
             };
         }
-        return Ok(());
+        return Ok(events);
     }
 
     if method_name == "withdraw" {
         let args = WithdrawCallArgs::try_from_slice(&decoded_args)?;
         let negative_delta =
             BigDecimal::from_str(&args.amount.to_string())?.mul(BigDecimal::from(-1));
-        let base =
-            db_adapters::get_base(Event::Aurora, shard_id, events.len(), outcome, block_header)?;
+        let base = db_adapters::get_base(Event::Aurora, outcome, block_header)?;
         let custom = coin::FtEvent {
             affected_id: outcome.receipt.predecessor_id.clone(),
             involved_id: None,
@@ -312,17 +301,18 @@ async fn process_aurora_functions(
             cause: "BURN".to_string(),
             memo: None,
         };
-        events.push(coin::build_event(json_rpc_client, cache, block_header, base, custom).await?);
 
-        return Ok(());
+        return Ok(vec![
+            coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
+        ]);
     }
 
     tracing::error!(
         target: crate::LOGGING_PREFIX,
-        "{} method {}, receipt {}",
+        "AURORA {} method {}, receipt {}",
         block_header.height,
         method_name,
         outcome.receipt.receipt_id
     );
-    Ok(())
+    Ok(vec![])
 }

@@ -3,7 +3,6 @@ use cached::SizedCache;
 use clap::Parser;
 use dotenv::dotenv;
 use futures::StreamExt;
-use std::collections::HashMap;
 use std::env;
 use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
@@ -27,11 +26,8 @@ pub struct AccountWithContract {
     pub contract_account_id: near_primitives::types::AccountId,
 }
 
-pub type FtBalanceCache =
+pub(crate) type FtBalanceCache =
     std::sync::Arc<Mutex<SizedCache<AccountWithContract, near_primitives::types::Balance>>>;
-// we should check how much memory we consume and maybe change the approach
-pub type ActiveContracts =
-    std::sync::Arc<Mutex<HashMap<near_primitives::types::AccountId, models::contracts::Contract>>>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -56,7 +52,9 @@ async fn main() -> anyhow::Result<()> {
     let ft_balance_cache: FtBalanceCache =
         std::sync::Arc::new(Mutex::new(SizedCache::with_size(100_000)));
     // We decided to ignore invalid contracts so we need to keep the cache for it
-    let contracts: ActiveContracts = std::sync::Arc::new(Mutex::new(HashMap::new()));
+    let contracts =
+        db_adapters::contracts::ContractsHelper::restore_from_db(&pool, opts.start_block_height)
+            .await?;
 
     let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
         .map(|streamer_message| {
@@ -100,7 +98,7 @@ async fn handle_streamer_message(
     pool: &sqlx::Pool<sqlx::Postgres>,
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     ft_balance_cache: &FtBalanceCache,
-    contracts: &ActiveContracts,
+    contracts: &db_adapters::contracts::ContractsHelper,
 ) -> anyhow::Result<u64> {
     if streamer_message.block.header.height % 100 == 0 {
         tracing::info!(

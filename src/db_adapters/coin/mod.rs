@@ -1,4 +1,4 @@
-use crate::db_adapters::contracts;
+use crate::db_adapters::{contracts, Event};
 use crate::models;
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
@@ -6,7 +6,7 @@ use futures::future::try_join_all;
 use futures::try_join;
 use near_lake_framework::near_indexer_primitives;
 use near_primitives::types::AccountId;
-use std::str::FromStr;
+use num_traits::Zero;
 
 pub(crate) mod balance_utils;
 mod legacy;
@@ -28,7 +28,7 @@ pub(crate) async fn store_ft(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     streamer_message: &near_indexer_primitives::StreamerMessage,
     ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &crate::ActiveContracts,
+    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<()> {
     let mut events: Vec<CoinEvent> = vec![];
 
@@ -44,60 +44,94 @@ pub(crate) async fn store_ft(
     for events_by_shard in try_join_all(events_futures).await? {
         events.extend(events_by_shard);
     }
+    models::chunked_insert(pool, &events).await
+}
 
+pub(crate) async fn filter_inconsistent_events(
+    coin_events: &mut Vec<CoinEvent>,
+    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
+    block_header: &near_indexer_primitives::views::BlockHeaderView,
+    contracts: &contracts::ContractsHelper,
+) -> anyhow::Result<()> {
     // We go by all collected events (sorted historically) and check the latest balance for each affected user
     // (we go backwards and check only first entry for each user)
-    let mut accounts_with_changes = std::collections::HashSet::new();
-    // We also collect all the contracts with the inconsistency
-    let mut contracts_with_inconsistency = std::collections::HashSet::new();
-    for event in events.iter().rev() {
-        if accounts_with_changes.insert(event.affected_account_id.clone()) {
-            balance_utils::check_balance(
+    let mut affected_account_ids = std::collections::HashSet::new();
+    let mut inconsistent_contracts = std::collections::HashSet::new();
+    for event in coin_events.iter().rev() {
+        if affected_account_ids.insert(event.affected_account_id.clone())
+            && !balance_utils::is_balance_correct(
                 json_rpc_client,
-                &streamer_message.block.header,
+                block_header,
                 &event.contract_account_id,
                 &event.affected_account_id,
                 &event.absolute_amount,
             )
-            .await
-            .map_err(|x| {
-                contracts_with_inconsistency.insert(event.contract_account_id.clone());
-                events
-                    .iter()
-                    .filter(|e| e.affected_account_id == event.affected_account_id)
-                    .for_each(|e| {
-                        tracing::error!(target: crate::LOGGING_PREFIX, "{:?}", e);
-                    });
-                x
-            })?;
-        }
-    }
-    // Dropping all the data with inconsistency.
-    // It may give us gaps in enumeration, e.g. nep141 events will have numbers 0, 1, 3, 7, 8
-    // It does not break the sorting order, so I prefer to leave it as it is
-    if !contracts_with_inconsistency.is_empty() {
-        // todo I have to clone data above because of this retain. Rewrite this
-        events.retain(|e| !contracts_with_inconsistency.contains(&e.contract_account_id));
-
-        for contract in &contracts_with_inconsistency {
-            contracts::mark_contract_inconsistent(
-                pool,
-                &AccountId::from_str(contract)?,
-                &streamer_message.block.header,
-                contracts,
-            )
-            .await?;
+            .await?
+            && inconsistent_contracts.insert(event.contract_account_id.clone())
+        {
+            contracts
+                .mark_contract_inconsistent(models::contracts::Contract {
+                    contract_account_id: event.contract_account_id.clone(),
+                    standard: event.standard.clone(),
+                    // If the contract was created earlier, this value would be ignored
+                    first_event_at_timestamp: event.block_timestamp.clone(),
+                    // If the contract was created earlier, this value would be ignored
+                    first_event_at_block_height: event.block_height.clone(),
+                    inconsistency_found_at_timestamp: Some(event.block_timestamp.clone()),
+                    inconsistency_found_at_block_height: Some(event.block_height.clone()),
+                })
+                .await?;
         }
     }
 
-    models::chunked_insert(pool, &events).await
+    if !inconsistent_contracts.is_empty() {
+        coin_events.retain(|event| !inconsistent_contracts.contains(&event.contract_account_id));
+    }
+    Ok(())
+}
+
+pub(crate) async fn register_new_contracts(
+    coin_events: &mut [CoinEvent],
+    contracts: &contracts::ContractsHelper,
+) -> anyhow::Result<()> {
+    let mut new_contracts = std::collections::HashSet::new();
+    for event in coin_events.iter().rev() {
+        if new_contracts.insert(event.contract_account_id.clone()) {
+            contracts
+                .try_register_contract(models::contracts::Contract {
+                    contract_account_id: event.contract_account_id.clone(),
+                    standard: event.standard.clone(),
+                    // If the contract was created earlier, this value would be ignored
+                    first_event_at_timestamp: event.block_timestamp.clone(),
+                    // If the contract was created earlier, this value would be ignored
+                    first_event_at_block_height: event.block_height.clone(),
+                    inconsistency_found_at_timestamp: None,
+                    inconsistency_found_at_block_height: None,
+                })
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn enumerate_events(
+    ft_events: &mut [crate::models::coin_events::CoinEvent],
+    shard_id: &near_indexer_primitives::types::ShardId,
+    timestamp: u64,
+    event_type: &Event,
+) -> anyhow::Result<()> {
+    for (index, event) in ft_events.iter_mut().enumerate() {
+        event.event_index =
+            crate::db_adapters::compose_db_index(timestamp, shard_id, event_type, index)?;
+    }
+    Ok(())
 }
 
 async fn collect_ft_for_shard(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     streamer_message: &near_indexer_primitives::StreamerMessage,
     ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &crate::ActiveContracts,
+    contracts: &contracts::ContractsHelper,
     shard: &near_indexer_primitives::IndexerShard,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let mut events: Vec<CoinEvent> = vec![];
@@ -144,15 +178,16 @@ async fn build_event(
     .await?;
 
     Ok(CoinEvent {
-        event_index: base.event_index,
+        event_index: BigDecimal::zero(), // initialized later
+        standard: base.standard,
         receipt_id: base.receipt_id,
+        block_height: base.block_height,
         block_timestamp: base.block_timestamp,
         contract_account_id: base.contract_account_id.to_string(),
         affected_account_id: custom.affected_id.to_string(),
         involved_account_id: custom.involved_id.map(|id| id.to_string()),
         delta_amount: custom.delta,
         absolute_amount,
-        // standard: "".to_string(),
         // coin_id: "".to_string(),
         cause: custom.cause,
         status: crate::db_adapters::get_status(&base.status),
