@@ -45,7 +45,6 @@ pub(crate) async fn check_contract_state(
                 standard: standard.to_string(),
                 first_event_at_timestamp: BigDecimal::from(block_header.timestamp),
                 first_event_at_block_height: BigDecimal::from(block_header.height),
-                // metadata: get_metadata(json_rpc_client, block_header, contract_account_id).await?,
                 inconsistency_found_at_timestamp: None,
                 inconsistency_found_at_block_height: None,
                 should_add_to_db: true,
@@ -76,7 +75,6 @@ pub(crate) async fn mark_contract_inconsistent(
         standard: "".to_string(),
         first_event_at_timestamp: Default::default(),
         first_event_at_block_height: Default::default(),
-        // metadata: Default::default(),
         inconsistency_found_at_timestamp: Some(BigDecimal::from(block_header.timestamp)),
         inconsistency_found_at_block_height: Some(BigDecimal::from(block_header.height)),
         should_add_to_db: false,
@@ -86,29 +84,3 @@ pub(crate) async fn mark_contract_inconsistent(
                             WHERE account_id = $1 AND inconsistency_found_at_timestamp IS NULL";
     models::update_retry_or_panic(pool, query, &contract, 10).await
 }
-
-// pub(crate) async fn update_metadata(
-//     pool: &sqlx::Pool<sqlx::Postgres>,
-//     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
-//     streamer_message: &near_indexer_primitives::StreamerMessage,
-//     contracts: &crate::ContractsCache,
-// ) -> anyhow::Result<()> {
-//     let contracts_lock = contracts.lock().await;
-//
-//     for (account_id, contract) in contracts_lock.iter() {
-//         get_metadata(json_rpc_client, &streamer_message.block.header, account_id);
-//         // todo compare with the old one, update if needed, update DB if needed
-//     }
-//     drop(contracts_lock);
-//
-//     Ok(())
-// }
-
-// pub(crate) async fn get_metadata(
-//     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
-//     block_header: &near_indexer_primitives::views::BlockHeaderView,
-//     contract_account_id: &near_primitives::types::AccountId,
-// ) -> anyhow::Result<serde_json::Value> {
-//     // todo implement + retriable
-//     Ok(serde_json::json!({}))
-// }

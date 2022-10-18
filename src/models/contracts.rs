@@ -9,7 +9,6 @@ pub struct Contract {
     pub standard: String,
     pub first_event_at_timestamp: BigDecimal,
     pub first_event_at_block_height: BigDecimal,
-    // pub metadata: serde_json::Value,
     pub inconsistency_found_at_timestamp: Option<BigDecimal>,
     pub inconsistency_found_at_block_height: Option<BigDecimal>,
     // ignored by the db
@@ -22,7 +21,6 @@ impl crate::models::SqlMethods for Contract {
         args.add(&self.standard);
         args.add(&self.first_event_at_timestamp);
         args.add(&self.first_event_at_block_height);
-        // args.add(&self.metadata);
         args.add(&self.inconsistency_found_at_timestamp);
         args.add(&self.inconsistency_found_at_block_height);
     }
@@ -32,7 +30,6 @@ impl crate::models::SqlMethods for Contract {
             // -1 because of the flag should_add_to_db
             + &crate::models::create_placeholders(items_count, Contract::field_count() - 1)?
             + " ON CONFLICT (contract_account_id) DO UPDATE SET "
-            + " metadata = excluded.metadata, "
             + " inconsistency_found_at_timestamp = excluded.inconsistency_found_at_timestamp, "
             + " inconsistency_found_at_block_height = excluded.inconsistency_found_at_block_height")
     }

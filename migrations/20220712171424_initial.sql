@@ -67,11 +67,6 @@ CREATE TABLE contracts
     standard                            text           NOT NULL,
     first_event_at_timestamp            numeric(20, 0) NOT NULL,
     first_event_at_block_height         numeric(20, 0) NOT NULL,
-
-    -- we may want to store all historical metadata, but I don't want to overcomplicate the current task
-    -- metadata                            jsonb          NOT NULL,
-    -- we also may want to store code_hash, but again it's better to do that in the other scope
-
     inconsistency_found_at_timestamp    numeric(20, 0),
     inconsistency_found_at_block_height numeric(20, 0)
 );
