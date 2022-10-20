@@ -1,23 +1,25 @@
+use crate::db_adapters::contracts;
+use crate::models;
 use bigdecimal::BigDecimal;
 use cached::Cached;
 use near_lake_framework::near_indexer_primitives;
 use near_primitives::views::ExecutionStatusView;
-use num_traits::Signed;
+use num_traits::{Signed, Zero};
 use std::ops::Add;
 use std::str::FromStr;
 
 pub(crate) async fn update_cache_and_get_balance(
     json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     ft_balance_cache: &crate::FtBalanceCache,
-    execution_status: &ExecutionStatusView,
+    base_fields: &crate::db_adapters::EventBase,
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    contract_id: near_primitives::types::AccountId,
     account_id: &str,
     delta_amount: &BigDecimal,
+    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<BigDecimal> {
     let account_with_contract = crate::AccountWithContract {
         account_id: near_primitives::types::AccountId::from_str(account_id)?,
-        contract_account_id: contract_id.clone(),
+        contract_account_id: base_fields.contract_account_id.clone(),
     };
     let prev_absolute_amount = BigDecimal::from_str(
         &get_balance(
@@ -29,7 +31,7 @@ pub(crate) async fn update_cache_and_get_balance(
         .await?
         .to_string(),
     )?;
-    let absolute_amount = match execution_status {
+    let mut absolute_amount = match base_fields.status {
         ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => prev_absolute_amount,
         ExecutionStatusView::SuccessValue(_) | ExecutionStatusView::SuccessReceiptId(_) => {
             prev_absolute_amount.add(delta_amount)
@@ -37,15 +39,28 @@ pub(crate) async fn update_cache_and_get_balance(
     };
 
     if absolute_amount.is_negative() {
-        anyhow::bail!(
+        contracts
+            .mark_contract_inconsistent(models::contracts::Contract {
+                contract_account_id: base_fields.contract_account_id.to_string(),
+                standard: base_fields.standard.clone(),
+                first_event_at_timestamp: base_fields.block_timestamp.clone(),
+                first_event_at_block_height: base_fields.block_height.clone(),
+                inconsistency_found_at_timestamp: Some(base_fields.block_timestamp.clone()),
+                inconsistency_found_at_block_height: Some(base_fields.block_height.clone()),
+            })
+            .await?;
+        tracing::error!(
+            target: crate::LOGGING_PREFIX,
             "Balance {} is negative for account {}, contract {}, block {} {}. Delta {}",
             account_id,
             absolute_amount,
-            contract_id,
+            base_fields.contract_account_id,
             block_header.height,
             block_header.hash,
             delta_amount
-        )
+        );
+        // We need to put here any valid u128 value, we anyway will drop this event later because it's inconsistent
+        absolute_amount = BigDecimal::zero();
     }
     save_latest_balance(
         account_with_contract,

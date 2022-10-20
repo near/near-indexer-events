@@ -7,6 +7,7 @@ use futures::try_join;
 use near_lake_framework::near_indexer_primitives;
 use near_primitives::types::AccountId;
 use num_traits::Zero;
+use std::str::FromStr;
 
 pub(crate) mod balance_utils;
 mod legacy;
@@ -58,17 +59,29 @@ pub(crate) async fn filter_inconsistent_events(
     let mut affected_account_ids = std::collections::HashSet::new();
     let mut inconsistent_contracts = std::collections::HashSet::new();
     for event in coin_events.iter().rev() {
-        if affected_account_ids.insert(event.affected_account_id.clone())
-            && !balance_utils::is_balance_correct(
-                json_rpc_client,
-                block_header,
-                &event.contract_account_id,
-                &event.affected_account_id,
-                &event.absolute_amount,
-            )
-            .await?
+        // We can mark contract as inconsistent during constructing events if we meet negative balance.
+        // In this case, we don't need to check balance: it's 100% wrong.
+        if (contracts
+            .is_contract_inconsistent(&AccountId::from_str(&event.contract_account_id)?)
+            .await
+            || affected_account_ids.insert(event.affected_account_id.clone())
+                && !balance_utils::is_balance_correct(
+                    json_rpc_client,
+                    block_header,
+                    &event.contract_account_id,
+                    &event.affected_account_id,
+                    &event.absolute_amount,
+                )
+                .await?)
             && inconsistent_contracts.insert(event.contract_account_id.clone())
         {
+            tracing::warn!(
+                target: crate::LOGGING_PREFIX,
+                "Inconsistent contract {} at block {}. Events collected:\n{:#?}",
+                event.contract_account_id,
+                block_header.height,
+                coin_events,
+            );
             contracts
                 .mark_contract_inconsistent(models::contracts::Contract {
                     contract_account_id: event.contract_account_id.clone(),
@@ -165,15 +178,16 @@ async fn build_event(
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     base: crate::db_adapters::EventBase,
     custom: FtEvent,
+    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<CoinEvent> {
     let absolute_amount = balance_utils::update_cache_and_get_balance(
         json_rpc_client,
         ft_balance_cache,
-        &base.status,
+        &base,
         block_header,
-        base.contract_account_id.clone(),
         &custom.affected_id,
         &custom.delta,
+        contracts,
     )
     .await?;
 

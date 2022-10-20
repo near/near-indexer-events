@@ -85,6 +85,7 @@ pub(crate) async fn collect_aurora(
                         ft_balance_cache,
                         action,
                         outcome,
+                        contracts,
                     )
                     .await?,
                 );
@@ -111,6 +112,7 @@ async fn process_aurora_functions(
     cache: &crate::FtBalanceCache,
     action: &ActionView,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
+    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let (method_name, args, ..) = match action {
         ActionView::FunctionCall {
@@ -147,7 +149,7 @@ async fn process_aurora_functions(
         let mut events = vec![];
         for log in &outcome.execution_outcome.outcome.logs {
             lazy_static::lazy_static! {
-                static ref RE: regex::Regex = regex::Regex::new(r"^Mint (?P<amount>(0|[1-9][0-9]*)) nETH tokens for: (?P<account_id>[a-z0-9\.\-]+)$").unwrap();
+                static ref RE: regex::Regex = regex::Regex::new(r"^Mint (?P<amount>(0|[1-9][0-9]*)) nETH tokens for: (?P<account_id>[a-z0-9_\.\-]+)$").unwrap();
             }
 
             if let Some(cap) = RE.captures(log) {
@@ -173,7 +175,15 @@ async fn process_aurora_functions(
                     memo: None,
                 };
                 events.push(
-                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
+                    coin::build_event(
+                        json_rpc_client,
+                        cache,
+                        block_header,
+                        base,
+                        custom,
+                        contracts,
+                    )
+                    .await?,
                 );
             };
         }
@@ -226,8 +236,24 @@ async fn process_aurora_functions(
             memo,
         };
         return Ok(vec![
-            coin::build_event(json_rpc_client, cache, block_header, base_from, custom_from).await?,
-            coin::build_event(json_rpc_client, cache, block_header, base_to, custom_to).await?,
+            coin::build_event(
+                json_rpc_client,
+                cache,
+                block_header,
+                base_from,
+                custom_from,
+                contracts,
+            )
+            .await?,
+            coin::build_event(
+                json_rpc_client,
+                cache,
+                block_header,
+                base_to,
+                custom_to,
+                contracts,
+            )
+            .await?,
         ]);
     }
 
@@ -236,7 +262,7 @@ async fn process_aurora_functions(
         let mut events = vec![];
         for log in &outcome.execution_outcome.outcome.logs {
             lazy_static::lazy_static! {
-                static ref RE: regex::Regex = regex::Regex::new(r"^Refund amount (?P<amount>(0|[1-9][0-9]*)) from (?P<from_account_id>[a-z0-9\.\-]+) to (?P<to_account_id>[a-z0-9\.\-]+)$").unwrap();
+                static ref RE: regex::Regex = regex::Regex::new(r"^Refund amount (?P<amount>(0|[1-9][0-9]*)) from (?P<from_account_id>[a-z0-9_\.\-]+) to (?P<to_account_id>[a-z0-9_\.\-]+)$").unwrap();
             }
 
             if let Some(cap) = RE.captures(log) {
@@ -268,8 +294,15 @@ async fn process_aurora_functions(
                     memo: None,
                 };
                 events.push(
-                    coin::build_event(json_rpc_client, cache, block_header, base_from, custom_from)
-                        .await?,
+                    coin::build_event(
+                        json_rpc_client,
+                        cache,
+                        block_header,
+                        base_from,
+                        custom_from,
+                        contracts,
+                    )
+                    .await?,
                 );
 
                 let base_to = db_adapters::get_base(Event::Aurora, outcome, block_header)?;
@@ -281,8 +314,15 @@ async fn process_aurora_functions(
                     memo: None,
                 };
                 events.push(
-                    coin::build_event(json_rpc_client, cache, block_header, base_to, custom_to)
-                        .await?,
+                    coin::build_event(
+                        json_rpc_client,
+                        cache,
+                        block_header,
+                        base_to,
+                        custom_to,
+                        contracts,
+                    )
+                    .await?,
                 );
             };
         }
@@ -303,7 +343,15 @@ async fn process_aurora_functions(
         };
 
         return Ok(vec![
-            coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
+            coin::build_event(
+                json_rpc_client,
+                cache,
+                block_header,
+                base,
+                custom,
+                contracts,
+            )
+            .await?,
         ]);
     }
 

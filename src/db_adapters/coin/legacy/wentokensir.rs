@@ -64,6 +64,7 @@ pub(crate) async fn collect_wentokensir(
                         ft_balance_cache,
                         action,
                         outcome,
+                        contracts,
                     )
                     .await?,
                 );
@@ -101,6 +102,7 @@ async fn process_wentokensir_functions(
     cache: &crate::FtBalanceCache,
     action: &ActionView,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
+    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let (method_name, args, deposit) = match action {
         ActionView::FunctionCall {
@@ -130,7 +132,15 @@ async fn process_wentokensir_functions(
             memo: None,
         };
         return Ok(vec![
-            coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
+            coin::build_event(
+                json_rpc_client,
+                cache,
+                block_header,
+                base,
+                custom,
+                contracts,
+            )
+            .await?,
         ]);
     }
 
@@ -161,7 +171,15 @@ async fn process_wentokensir_functions(
             memo: None,
         };
         return Ok(vec![
-            coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
+            coin::build_event(
+                json_rpc_client,
+                cache,
+                block_header,
+                base,
+                custom,
+                contracts,
+            )
+            .await?,
         ]);
     }
 
@@ -210,8 +228,24 @@ async fn process_wentokensir_functions(
             memo,
         };
         return Ok(vec![
-            coin::build_event(json_rpc_client, cache, block_header, base_from, custom_from).await?,
-            coin::build_event(json_rpc_client, cache, block_header, base_to, custom_to).await?,
+            coin::build_event(
+                json_rpc_client,
+                cache,
+                block_header,
+                base_from,
+                custom_from,
+                contracts,
+            )
+            .await?,
+            coin::build_event(
+                json_rpc_client,
+                cache,
+                block_header,
+                base_to,
+                custom_to,
+                contracts,
+            )
+            .await?,
         ]);
     }
 
@@ -271,7 +305,15 @@ async fn process_wentokensir_functions(
                     memo,
                 };
                 return Ok(vec![
-                    coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
+                    coin::build_event(
+                        json_rpc_client,
+                        cache,
+                        block_header,
+                        base,
+                        custom,
+                        contracts,
+                    )
+                    .await?,
                 ]);
             }
             if log.starts_with("Refund ") {
@@ -295,10 +337,24 @@ async fn process_wentokensir_functions(
                 };
 
                 return Ok(vec![
-                    coin::build_event(json_rpc_client, cache, block_header, base_from, custom_from)
-                        .await?,
-                    coin::build_event(json_rpc_client, cache, block_header, base_to, custom_to)
-                        .await?,
+                    coin::build_event(
+                        json_rpc_client,
+                        cache,
+                        block_header,
+                        base_from,
+                        custom_from,
+                        contracts,
+                    )
+                    .await?,
+                    coin::build_event(
+                        json_rpc_client,
+                        cache,
+                        block_header,
+                        base_to,
+                        custom_to,
+                        contracts,
+                    )
+                    .await?,
                 ]);
             }
         }
@@ -334,7 +390,15 @@ async fn process_wentokensir_functions(
             memo: None,
         };
         return Ok(vec![
-            coin::build_event(json_rpc_client, cache, block_header, base, custom).await?,
+            coin::build_event(
+                json_rpc_client,
+                cache,
+                block_header,
+                base,
+                custom,
+                contracts,
+            )
+            .await?,
         ]);
     }
 
