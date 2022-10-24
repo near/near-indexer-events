@@ -10,6 +10,7 @@ pub(crate) mod contracts;
 mod event_types;
 pub(crate) mod events;
 mod nft;
+mod numeric_types;
 
 pub(crate) const CHUNK_SIZE_FOR_BATCH_INSERT: usize = 100;
 pub(crate) const RETRY_COUNT: usize = 10;

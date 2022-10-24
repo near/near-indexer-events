@@ -1,6 +1,5 @@
 use crate::db_adapters;
-use crate::db_adapters::Event;
-use crate::db_adapters::{coin, contracts};
+use crate::db_adapters::{coin, contracts, numeric_types, Event};
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
@@ -14,13 +13,13 @@ use std::str::FromStr;
 struct FtNew {
     // pub metadata: ...,
     pub owner_id: AccountId,
-    pub total_supply: String,
+    pub total_supply: numeric_types::U128,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 struct FtTransfer {
     pub receiver_id: AccountId,
-    pub amount: String,
+    pub amount: numeric_types::U128,
     pub memo: Option<String>,
 }
 
@@ -28,13 +27,13 @@ struct FtTransfer {
 struct FtRefund {
     pub receiver_id: AccountId,
     pub sender_id: AccountId,
-    pub amount: String,
+    pub amount: numeric_types::U128,
     pub memo: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 struct NearWithdraw {
-    pub amount: String,
+    pub amount: numeric_types::U128,
 }
 
 pub(crate) async fn collect_tkn_near(
@@ -148,7 +147,7 @@ async fn process_tkn_near_functions(
         };
         coin::balance_utils::save_latest_balance(account_with_contract, 0, cache).await;
 
-        let delta = BigDecimal::from_str(&args.total_supply)?;
+        let delta = BigDecimal::from_str(&args.total_supply.0.to_string())?;
         let base = db_adapters::get_base(Event::TknNear, outcome, block_header)?;
         let custom = coin::FtEvent {
             affected_id: args.owner_id,
@@ -214,7 +213,7 @@ async fn process_tkn_near_functions(
             }
         };
 
-        let delta = BigDecimal::from_str(&ft_transfer_args.amount)?;
+        let delta = BigDecimal::from_str(&ft_transfer_args.amount.0.to_string())?;
         let negative_delta = delta.clone().mul(BigDecimal::from(-1));
         let memo = ft_transfer_args
             .memo
@@ -281,7 +280,7 @@ async fn process_tkn_near_functions(
                 }
             }
         };
-        let mut delta = BigDecimal::from_str(&ft_refund_args.amount)?;
+        let mut delta = BigDecimal::from_str(&ft_refund_args.amount.0.to_string())?;
         // The contract may return only the part of the coins.
         // We should parse it from the output and subtract from the value from args
         if let ExecutionStatusView::SuccessValue(transferred_amount_decoded) =
@@ -390,7 +389,8 @@ async fn process_tkn_near_functions(
                 }
             }
         };
-        let negative_delta = BigDecimal::from_str(&ft_burn_args.amount)?.mul(BigDecimal::from(-1));
+        let negative_delta =
+            BigDecimal::from_str(&ft_burn_args.amount.0.to_string())?.mul(BigDecimal::from(-1));
 
         let base = db_adapters::get_base(Event::TknNear, outcome, block_header)?;
         let custom = coin::FtEvent {

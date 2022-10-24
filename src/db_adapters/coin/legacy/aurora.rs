@@ -1,6 +1,6 @@
 use crate::db_adapters;
-use crate::db_adapters::Event;
 use crate::db_adapters::{coin, contracts};
+use crate::db_adapters::{numeric_types, Event};
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
@@ -16,7 +16,7 @@ use std::str::FromStr;
 #[derive(Deserialize, Debug, Clone)]
 struct FtTransfer {
     pub receiver_id: AccountId,
-    pub amount: String,
+    pub amount: numeric_types::U128,
     pub memo: Option<String>,
 }
 
@@ -26,7 +26,7 @@ struct FtTransfer {
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct WithdrawCallArgs {
     pub recipient_address: Address,
-    pub amount: u128,
+    pub amount: numeric_types::U128,
 }
 
 /// Base Eth Address type
@@ -211,7 +211,7 @@ async fn process_aurora_functions(
             }
         };
 
-        let delta = BigDecimal::from_str(&ft_transfer_args.amount)?;
+        let delta = BigDecimal::from_str(&ft_transfer_args.amount.0.to_string())?;
         let negative_delta = delta.clone().mul(BigDecimal::from(-1));
         let memo = ft_transfer_args
             .memo
@@ -330,9 +330,24 @@ async fn process_aurora_functions(
     }
 
     if method_name == "withdraw" {
-        let args = WithdrawCallArgs::try_from_slice(&decoded_args)?;
+        let args = match WithdrawCallArgs::try_from_slice(&decoded_args) {
+            Ok(x) => x,
+            Err(err) => {
+                match outcome.execution_outcome.outcome.status {
+                    // We couldn't parse args for failed receipt. Let's just ignore it, we can't save it properly
+                    ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => {
+                        return Ok(vec![])
+                    }
+                    ExecutionStatusView::SuccessValue(_)
+                    | ExecutionStatusView::SuccessReceiptId(_) => {
+                        anyhow::bail!(err)
+                    }
+                }
+            }
+        };
+
         let negative_delta =
-            BigDecimal::from_str(&args.amount.to_string())?.mul(BigDecimal::from(-1));
+            BigDecimal::from_str(&args.amount.0.to_string())?.mul(BigDecimal::from(-1));
         let base = db_adapters::get_base(Event::Aurora, outcome, block_header)?;
         let custom = coin::FtEvent {
             affected_id: outcome.receipt.predecessor_id.clone(),
