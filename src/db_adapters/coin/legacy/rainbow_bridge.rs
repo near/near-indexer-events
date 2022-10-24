@@ -1,5 +1,5 @@
 use crate::db_adapters;
-use crate::db_adapters::{coin, contracts, Event};
+use crate::db_adapters::{coin, contracts, numeric_types, Event};
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
@@ -18,7 +18,7 @@ struct Mint {
 #[derive(Deserialize, Debug, Clone)]
 struct FtTransfer {
     pub receiver_id: AccountId,
-    pub amount: String,
+    pub amount: numeric_types::U128,
     pub memo: Option<String>,
 }
 
@@ -26,13 +26,13 @@ struct FtTransfer {
 struct FtRefund {
     pub receiver_id: AccountId,
     pub sender_id: AccountId,
-    pub amount: String,
+    pub amount: numeric_types::U128,
     pub memo: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 struct Withdraw {
-    pub amount: String,
+    pub amount: numeric_types::U128,
     // Contains internal info of bridged contracts. It's not NEAR account_id
     // pub recipient: AccountId,
 }
@@ -183,7 +183,7 @@ async fn process_rainbow_bridge_functions(
             }
         };
 
-        let delta = BigDecimal::from_str(&ft_transfer_args.amount)?;
+        let delta = BigDecimal::from_str(&ft_transfer_args.amount.0.to_string())?;
         let negative_delta = delta.clone().mul(BigDecimal::from(-1));
         let memo = ft_transfer_args
             .memo
@@ -250,7 +250,7 @@ async fn process_rainbow_bridge_functions(
                 }
             }
         };
-        let mut delta = BigDecimal::from_str(&ft_refund_args.amount)?;
+        let mut delta = BigDecimal::from_str(&ft_refund_args.amount.0.to_string())?;
         // The contract may return only the part of the coins.
         // We should parse it from the output and subtract from the value from args
         if let ExecutionStatusView::SuccessValue(transferred_amount_decoded) =
@@ -358,7 +358,8 @@ async fn process_rainbow_bridge_functions(
                 }
             }
         };
-        let negative_delta = BigDecimal::from_str(&ft_burn_args.amount)?.mul(BigDecimal::from(-1));
+        let negative_delta =
+            BigDecimal::from_str(&ft_burn_args.amount.0.to_string())?.mul(BigDecimal::from(-1));
 
         let base = db_adapters::get_base(Event::RainbowBridge, outcome, block_header)?;
         let custom = coin::FtEvent {
