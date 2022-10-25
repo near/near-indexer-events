@@ -100,7 +100,14 @@ async fn process_wrap_near_functions(
 
     let decoded_args = base64::decode(args)?;
 
-    if method_name == "storage_deposit" {
+    if vec![
+        "storage_deposit",
+        "ft_balance_of",
+        "ft_metadata",
+        "ft_total_supply",
+    ]
+    .contains(&method_name.as_str())
+    {
         return Ok(vec![]);
     }
 

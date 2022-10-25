@@ -118,7 +118,15 @@ async fn process_rainbow_bridge_functions(
 
     let decoded_args = base64::decode(args)?;
 
-    if vec!["storage_deposit", "finish_deposit", "verify_log_entry"].contains(&method_name.as_str())
+    if vec![
+        "storage_deposit",
+        "finish_deposit",
+        "verify_log_entry",
+        "ft_balance_of",
+        "ft_metadata",
+        "ft_total_supply",
+    ]
+    .contains(&method_name.as_str())
     {
         return Ok(vec![]);
     }

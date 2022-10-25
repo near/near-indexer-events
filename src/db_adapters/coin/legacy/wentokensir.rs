@@ -115,7 +115,16 @@ async fn process_wentokensir_functions(
 
     let decoded_args = base64::decode(args)?;
 
-    if vec!["storage_deposit", "new", "on_ft_metadata"].contains(&method_name.as_str()) {
+    if vec![
+        "storage_deposit",
+        "new",
+        "on_ft_metadata",
+        "ft_balance_of",
+        "ft_metadata",
+        "ft_total_supply",
+    ]
+    .contains(&method_name.as_str())
+    {
         return Ok(vec![]);
     }
 

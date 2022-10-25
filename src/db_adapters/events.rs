@@ -39,7 +39,7 @@ pub(crate) fn extract_events(
         ) {
             Ok(result) => Some(result),
             Err(err) => {
-                tracing::warn!(
+                tracing::info!(
                     target: crate::LOGGING_PREFIX,
                     "Provided event log does not correspond to any of formats defined in NEP. Will ignore this event. \n {:#?} \n{:#?}",
                     err,

@@ -137,6 +137,9 @@ async fn process_aurora_functions(
         "deploy_erc20_token",
         "get_nep141_from_erc20",
         "ft_on_transfer",
+        "ft_balance_of",
+        "ft_metadata",
+        "ft_total_supply",
     ]
     .contains(&method_name.as_str())
     {
