@@ -38,7 +38,9 @@ pub(crate) async fn update_cache_and_get_balance(
         }
     };
 
-    if absolute_amount.is_negative() {
+    if absolute_amount.is_negative()
+        || absolute_amount > BigDecimal::from_str(&i128::MAX.to_string())?
+    {
         contracts
             .mark_contract_inconsistent(models::contracts::Contract {
                 contract_account_id: base_fields.contract_account_id.to_string(),
@@ -51,7 +53,7 @@ pub(crate) async fn update_cache_and_get_balance(
             .await?;
         tracing::error!(
             target: crate::LOGGING_PREFIX,
-            "Balance {} is negative for account {}, contract {}, block {} {}. Delta {}",
+            "Balance {} does not fit into i128 for account {}, contract {}, block {} {}. Delta {}",
             account_id,
             absolute_amount,
             base_fields.contract_account_id,
