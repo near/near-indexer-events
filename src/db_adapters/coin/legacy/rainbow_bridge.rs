@@ -124,6 +124,7 @@ async fn process_rainbow_bridge_functions(
         "verify_log_entry",
         "ft_balance_of",
         "ft_metadata",
+        "set_metadata",
         "ft_total_supply",
     ]
     .contains(&method_name.as_str())

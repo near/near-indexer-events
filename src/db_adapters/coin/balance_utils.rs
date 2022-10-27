@@ -21,16 +21,25 @@ pub(crate) async fn update_cache_and_get_balance(
         account_id: near_primitives::types::AccountId::from_str(account_id)?,
         contract_account_id: base_fields.contract_account_id.clone(),
     };
-    let prev_absolute_amount = BigDecimal::from_str(
-        &get_balance(
-            account_with_contract.clone(),
-            &block_header.prev_hash,
-            ft_balance_cache,
-            json_rpc_client,
-        )
-        .await?
-        .to_string(),
-    )?;
+    let prev_balance = match get_balance(
+        account_with_contract.clone(),
+        &block_header.prev_hash,
+        ft_balance_cache,
+        json_rpc_client,
+    )
+    .await
+    {
+        Ok(x) => x,
+        Err(e) => {
+            if e.to_string().contains("The contract is not initialized") {
+                0
+            } else {
+                return Err(e);
+            }
+        }
+    };
+
+    let prev_absolute_amount = BigDecimal::from_str(&prev_balance.to_string())?;
     let mut absolute_amount = match base_fields.status {
         ExecutionStatusView::Unknown | ExecutionStatusView::Failure(_) => prev_absolute_amount,
         ExecutionStatusView::SuccessValue(_) | ExecutionStatusView::SuccessReceiptId(_) => {
@@ -41,6 +50,8 @@ pub(crate) async fn update_cache_and_get_balance(
     if absolute_amount.is_negative()
         || absolute_amount > BigDecimal::from_str(&i128::MAX.to_string())?
     {
+        // todo it's  better to add column reason and log there the reason of inconsistency
+        // now we have 3 of them: negative, overflow, does not match with RPC
         contracts
             .mark_contract_inconsistent(models::contracts::Contract {
                 contract_account_id: base_fields.contract_account_id.to_string(),
@@ -111,14 +122,7 @@ async fn get_balance_from_rpc_retriable(
     let mut retry_attempt = 0usize;
 
     loop {
-        if retry_attempt == crate::db_adapters::RETRY_COUNT {
-            anyhow::bail!(
-                "Failed to perform query to RPC after {} attempts. Stop trying.\nContract {}, block_hash {}",
-                crate::db_adapters::RETRY_COUNT,
-                contract_id,
-                block_hash.to_string()
-            );
-        }
+        // todo sometimes retry will not help. Identify such cases, mark errors somehow and return early
         retry_attempt += 1;
 
         match get_balance_from_rpc(json_rpc_client, block_hash, contract_id.clone(), account_id)
@@ -126,7 +130,7 @@ async fn get_balance_from_rpc_retriable(
         {
             Ok(res) => return Ok(res),
             Err(err) => {
-                tracing::error!(
+                tracing::warn!(
                     target: crate::LOGGING_PREFIX,
                     "Failed to request ft_balance_of from RPC for account {}, contract {}, block_hash {}.{}\n Retrying in {} milliseconds...",
                     account_id,
@@ -135,6 +139,15 @@ async fn get_balance_from_rpc_retriable(
                     err,
                     interval.as_millis(),
                 );
+                if retry_attempt >= crate::db_adapters::RETRY_COUNT {
+                    tracing::error!(
+                        "Failed to perform query to RPC after {} attempts. Stop trying.\nContract {}, block_hash {}",
+                        crate::db_adapters::RETRY_COUNT,
+                        contract_id,
+                        block_hash.to_string()
+                    );
+                    return Err(err);
+                }
                 tokio::time::sleep(interval).await;
                 if interval < crate::MAX_DELAY_TIME {
                     interval *= 2;

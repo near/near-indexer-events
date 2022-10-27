@@ -133,6 +133,7 @@ async fn process_aurora_functions(
         "new_eth_connector",
         "set_eth_connector_contract_data",
         "deposit",
+        "storage_deposit",
         "submit",
         "deploy_erc20_token",
         "get_nep141_from_erc20",
