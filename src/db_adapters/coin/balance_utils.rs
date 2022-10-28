@@ -47,11 +47,9 @@ pub(crate) async fn update_cache_and_get_balance(
         }
     };
 
-    if absolute_amount.is_negative()
-        || absolute_amount > BigDecimal::from_str(&i128::MAX.to_string())?
-    {
-        // todo it's  better to add column reason and log there the reason of inconsistency
-        // now we have 3 of them: negative, overflow, does not match with RPC
+    if absolute_amount.is_negative() {
+        // todo it's better to add column reason and log there the reason of inconsistency
+        // now we have: negative/overflow, does not match with RPC
         contracts
             .mark_contract_inconsistent(models::contracts::Contract {
                 contract_account_id: base_fields.contract_account_id.to_string(),
@@ -64,7 +62,7 @@ pub(crate) async fn update_cache_and_get_balance(
             .await?;
         tracing::error!(
             target: crate::LOGGING_PREFIX,
-            "Balance {} does not fit into i128 for account {}, contract {}, block {} {}. Delta {}",
+            "Balance {} does not fit into u128 for account {}, contract {}, block {} {}. Delta {}",
             account_id,
             absolute_amount,
             base_fields.contract_account_id,
@@ -141,6 +139,7 @@ async fn get_balance_from_rpc_retriable(
                 );
                 if retry_attempt >= crate::db_adapters::RETRY_COUNT {
                     tracing::error!(
+                        target: crate::LOGGING_PREFIX,
                         "Failed to perform query to RPC after {} attempts. Stop trying.\nContract {}, block_hash {}",
                         crate::db_adapters::RETRY_COUNT,
                         contract_id,
