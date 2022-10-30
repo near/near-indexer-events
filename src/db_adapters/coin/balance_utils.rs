@@ -31,7 +31,10 @@ pub(crate) async fn update_cache_and_get_balance(
     {
         Ok(x) => x,
         Err(e) => {
-            if e.to_string().contains("The contract is not initialized") {
+            if e.to_string()
+                .contains("does not implement any suitable contract")
+                || e.to_string().contains("The contract is not initialized")
+            {
                 0
             } else {
                 return Err(e);
@@ -63,8 +66,8 @@ pub(crate) async fn update_cache_and_get_balance(
         tracing::error!(
             target: crate::LOGGING_PREFIX,
             "Balance {} does not fit into u128 for account {}, contract {}, block {} {}. Delta {}",
-            account_id,
             absolute_amount,
+            account_id,
             base_fields.contract_account_id,
             block_header.height,
             block_header.hash,
@@ -196,17 +199,39 @@ pub(crate) async fn is_balance_correct(
     account_id: &str,
     amount: &BigDecimal,
 ) -> anyhow::Result<bool> {
-    let correct_value = get_balance_from_rpc_retriable(
+    let correct_value = match get_balance_from_rpc_retriable(
         json_rpc_client,
         &block_header.hash,
         near_primitives::types::AccountId::from_str(contract_id)?,
         account_id,
     )
-    .await?;
-    Ok(if correct_value != amount.to_string().parse::<u128>()? {
+    .await
+    {
+        Ok(x) => x,
+        Err(e) => {
+            if e.to_string()
+                .contains("does not implement any suitable contract")
+                || e.to_string().contains("The contract is not initialized")
+            {
+                tracing::error!(
+                    target: crate::LOGGING_PREFIX,
+                    "Unable to call ft_balance_of at contract {}. Block {} {}",
+                    contract_id,
+                    block_header.height,
+                    block_header.hash,
+                );
+                return Ok(false);
+            } else {
+                return Err(e);
+            }
+        }
+    };
+    Ok(if correct_value == amount.to_string().parse::<u128>()? {
+        true
+    } else {
         tracing::error!(
             target: crate::LOGGING_PREFIX,
-            "Balance is wrong for account {}, contract {}: expected {}, actual {}. Block {} {}",
+            "Balance is wrong for account {}, contract {}: expected {:?}, actual {}. Block {} {}",
             account_id,
             contract_id,
             correct_value,
@@ -215,7 +240,5 @@ pub(crate) async fn is_balance_correct(
             block_header.hash,
         );
         false
-    } else {
-        true
     })
 }
