@@ -65,6 +65,11 @@ async fn compose_db_events(
     match &events.event_kind {
         event_types::Nep141EventKind::FtMint(mint_events) => {
             for mint_event in mint_events {
+                // We filter such things later; I add this check here
+                // only because sweatcoin produces too many such events and we want to ignore them in the early beginning
+                if mint_event.amount == "0" {
+                    continue;
+                }
                 let base = get_base(Event::Nep141, outcome, block_header)?;
                 let custom = coin::FtEvent {
                     affected_id: AccountId::from_str(&mint_event.owner_id)?,

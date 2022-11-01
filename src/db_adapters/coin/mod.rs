@@ -54,6 +54,8 @@ pub(crate) async fn filter_inconsistent_events(
     block_header: &near_indexer_primitives::views::BlockHeaderView,
     contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<()> {
+    // At first, we can filter events with zero delta: they make no sense for us
+    coin_events.retain(|event| !event.delta_amount.is_zero());
     // We go by all collected events (sorted historically) and check the latest balance for each affected user
     // (we go backwards and check only first entry for each user)
     let mut affected_account_ids = std::collections::HashSet::new();
