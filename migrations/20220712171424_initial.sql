@@ -29,9 +29,9 @@ CREATE INDEX nft_events_old_owner_account_id_idx ON nft_events
 CREATE INDEX nft_events_new_owner_account_id_idx ON nft_events
     USING btree (new_owner_account_id);
 
-ALTER TABLE nft_events
-    ADD CONSTRAINT nft_events_fk
-        FOREIGN KEY (receipt_id) REFERENCES receipts (receipt_id) ON DELETE CASCADE;
+-- ALTER TABLE nft_events
+--     ADD CONSTRAINT nft_events_fk
+--         FOREIGN KEY (receipt_id) REFERENCES receipts (receipt_id) ON DELETE CASCADE;
 
 CREATE TABLE coin_events
 (
@@ -59,9 +59,9 @@ CREATE INDEX coin_events_block_timestamp_idx ON coin_events
 CREATE INDEX coin_events_affected_account_id_idx ON coin_events
     USING btree (affected_account_id);
 
-ALTER TABLE coin_events
-    ADD CONSTRAINT coin_events_fk
-        FOREIGN KEY (receipt_id) REFERENCES receipts (receipt_id) ON DELETE CASCADE;
+-- ALTER TABLE coin_events
+--     ADD CONSTRAINT coin_events_fk
+--         FOREIGN KEY (receipt_id) REFERENCES receipts (receipt_id) ON DELETE CASCADE;
 
 CREATE TABLE contracts
 (
