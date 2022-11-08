@@ -11,7 +11,6 @@ CREATE TABLE nft_events
     token_id              text           NOT NULL,
     cause                 text           NOT NULL,
     status                text           NOT NULL,
-
     -- Previous owner of the token. Null if we have nft_event_kind 'MINT'.
     old_owner_account_id  text,
     -- New owner of the token. Null if we have nft_event_kind 'BURN'.
@@ -20,14 +19,10 @@ CREATE TABLE nft_events
     event_memo            text
 );
 
-CREATE INDEX nft_events_block_timestamp_idx ON nft_events
-    USING btree (block_timestamp);
-
-CREATE INDEX nft_events_old_owner_account_id_idx ON nft_events
-    USING btree (old_owner_account_id);
-
-CREATE INDEX nft_events_new_owner_account_id_idx ON nft_events
-    USING btree (new_owner_account_id);
+CREATE INDEX CONCURRENTLY nft_events_block_height_idx ON nft_events (block_height);
+CREATE INDEX CONCURRENTLY nft_events_receipt_id_idx ON nft_events (receipt_id);
+CREATE INDEX CONCURRENTLY nft_events_old_owner_account_id_idx ON nft_events (old_owner_account_id);
+CREATE INDEX CONCURRENTLY nft_events_new_owner_account_id_idx ON nft_events (new_owner_account_id);
 
 -- ALTER TABLE nft_events
 --     ADD CONSTRAINT nft_events_fk
@@ -53,11 +48,9 @@ CREATE TABLE coin_events
     event_memo          text
 );
 
-CREATE INDEX coin_events_block_timestamp_idx ON coin_events
-    USING btree (block_timestamp);
-
-CREATE INDEX coin_events_affected_account_id_idx ON coin_events
-    USING btree (affected_account_id);
+CREATE INDEX CONCURRENTLY coin_events_block_height_idx ON coin_events (block_height);
+CREATE INDEX CONCURRENTLY coin_events_receipt_id_idx ON coin_events (receipt_id);
+CREATE INDEX CONCURRENTLY coin_events_affected_account_id_idx ON coin_events (affected_account_id);
 
 -- ALTER TABLE coin_events
 --     ADD CONSTRAINT coin_events_fk

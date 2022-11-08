@@ -49,4 +49,3 @@ macro_rules! impl_str_type {
 
 impl_str_type!(U128, u128);
 impl_str_type!(U64, u64);
-impl_str_type!(I128, i128);

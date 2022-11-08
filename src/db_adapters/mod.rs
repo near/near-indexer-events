@@ -86,7 +86,6 @@ fn compose_db_index(
     event: &Event,
     event_index: usize,
 ) -> anyhow::Result<BigDecimal> {
-    let timestamp_millis: u128 = (block_timestamp as u128) / 1_000_000;
     let event_type_index: u128 = match event {
         Event::Nep141 => 1,
         Event::Nep171 => 2,
@@ -97,9 +96,9 @@ fn compose_db_index(
         Event::Wentokensir => 7,
         Event::WrapNear => 8,
     };
-    let db_index: u128 = timestamp_millis * 100_000_000_000 * 100_000_000_000
-        + (*shard_id as u128) * 10_000_000
-        + event_type_index * 10_000
+    let db_index: u128 = (block_timestamp as u128) * 100_000_000 * 100_000_000
+        + (*shard_id as u128) * 1_000_000_000
+        + event_type_index * 1_000_000
         + (event_index as u128);
     Ok(BigDecimal::from_str(&db_index.to_string())?)
 }

@@ -199,6 +199,10 @@ pub(crate) async fn is_balance_correct(
     account_id: &str,
     amount: &BigDecimal,
 ) -> anyhow::Result<bool> {
+    // todo We just can't check it properly, we check 1 block 10+ seconds
+    if contract_id == "token.sweat" {
+        return Ok(true);
+    }
     let correct_value = match get_balance_from_rpc_retriable(
         json_rpc_client,
         &block_header.hash,
