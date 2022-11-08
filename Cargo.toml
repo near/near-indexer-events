@@ -1,5 +1,5 @@
 [package]
-name = "indexer-accounts"
+name = "indexer-events"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.62.1"

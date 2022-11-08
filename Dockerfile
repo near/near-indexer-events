@@ -14,5 +14,5 @@ RUN cargo build --release
 
 FROM ubuntu:20.04
 RUN apt update && apt install -yy openssl ca-certificates
-COPY --from=builder /tmp/target/release/indexer-accounts .
-ENTRYPOINT ["./indexer-accounts"]
+COPY --from=builder /tmp/target/release/indexer-events .
+ENTRYPOINT ["./indexer-events"]
