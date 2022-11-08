@@ -2,7 +2,7 @@ use futures::future::try_join_all;
 use sqlx::Arguments;
 use std::fmt::Write;
 
-pub use indexer_accounts::FieldCount;
+pub use indexer_events::FieldCount;
 
 pub(crate) mod coin_events;
 pub(crate) mod contracts;
