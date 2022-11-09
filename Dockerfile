@@ -1,10 +1,9 @@
 FROM rust:1.62 AS builder
 WORKDIR /tmp/
-COPY Cargo.toml Cargo.lock ./
-COPY src/lib.rs src/lib.rs
 
 # this build step will cache your dependencies
-RUN cargo build --release && rm -r src
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && touch src/lib.rs && cargo build --release && rm -r src
 
 # copy your source tree
 COPY ./src ./src
