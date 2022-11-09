@@ -30,8 +30,9 @@ syn = "1.0.90"
 tempfile = "3.3.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1" }
-tracing = "0.1.13"
-tracing-subscriber = "0.2.4"
+tracing = "0.1.35"
+tracing-subscriber = { version = "0.3.11", features = ["fmt", "std", "env-filter"] }
+tracing-appender = "0.2.2"
 quote = "1.0.17"
 
 near-jsonrpc-primitives = "0.14.0"
