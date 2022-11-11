@@ -6,14 +6,15 @@ use futures::StreamExt;
 use std::env;
 use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
+use tracing_utils::DefaultSubcriberGuard;
 
 use crate::configs::Opts;
 use near_lake_framework::near_indexer_primitives;
-
 mod configs;
 mod db_adapters;
 mod models;
 mod rpc_helpers;
+mod tracing_utils;
 
 pub(crate) const LOGGING_PREFIX: &str = "indexer_events";
 
@@ -42,7 +43,8 @@ async fn main() -> anyhow::Result<()> {
         .start_block_height(opts.start_block_height)
         .blocks_preload_pool_size(100)
         .build()?;
-    init_tracing();
+
+    let _writer_guard = init_tracing();
 
     let (lake_handle, stream) = near_lake_framework::streamer(config);
     let json_rpc_client = near_jsonrpc_client::JsonRpcClient::connect(&opts.near_archival_rpc_url);
@@ -120,7 +122,7 @@ async fn handle_streamer_message(
     Ok(streamer_message.block.header.height)
 }
 
-fn init_tracing() {
+fn init_tracing() -> DefaultSubcriberGuard {
     let mut env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
 
     if let Ok(rust_log) = env::var("RUST_LOG") {
@@ -142,8 +144,15 @@ fn init_tracing() {
         }
     }
 
-    tracing_subscriber::fmt::Subscriber::builder()
+    let (non_blocking_writer, _guard) = tracing_appender::non_blocking(std::io::stderr());
+
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_env_filter(env_filter)
-        .with_writer(std::io::stderr)
-        .init();
+        .with_writer(non_blocking_writer)
+        .finish();
+
+    DefaultSubcriberGuard {
+        subscriber_guard: tracing::subscriber::set_default(subscriber),
+        writer_guard: _guard,
+    }
 }
