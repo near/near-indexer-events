@@ -3,10 +3,10 @@ use cached::SizedCache;
 use clap::Parser;
 use dotenv::dotenv;
 use futures::StreamExt;
-use tracing_utils::DefaultSubcriberGuard;
 use std::env;
 use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
+use tracing_utils::DefaultSubcriberGuard;
 
 use crate::configs::Opts;
 use near_lake_framework::near_indexer_primitives;
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
         .start_block_height(opts.start_block_height)
         .blocks_preload_pool_size(100)
         .build()?;
-    
+
     let _writer_guard = init_tracing();
 
     let (lake_handle, stream) = near_lake_framework::streamer(config);
@@ -144,15 +144,15 @@ fn init_tracing() -> DefaultSubcriberGuard {
         }
     }
 
-   let (non_blocking_writer, _guard) = tracing_appender::non_blocking(std::io::stderr());
-   
-   let subscriber = tracing_subscriber::FmtSubscriber::builder()
-   .with_env_filter(env_filter)
-   .with_writer(non_blocking_writer)
-   .finish();
+    let (non_blocking_writer, _guard) = tracing_appender::non_blocking(std::io::stderr());
 
-   DefaultSubcriberGuard {
-    subscriber_guard: tracing::subscriber::set_default(subscriber),
-    writer_guard:_guard,
-   }
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+        .with_env_filter(env_filter)
+        .with_writer(non_blocking_writer)
+        .finish();
+
+    DefaultSubcriberGuard {
+        subscriber_guard: tracing::subscriber::set_default(subscriber),
+        writer_guard: _guard,
+    }
 }
