@@ -1,5 +1,4 @@
 use futures::future::try_join_all;
-use sqlx::Arguments;
 use std::fmt::Write;
 
 pub use indexer_events::FieldCount;
@@ -71,49 +70,6 @@ async fn insert_retry_or_panic<T: SqlMethods + std::fmt::Debug>(
         }
     }
     Ok(())
-}
-
-pub(crate) async fn select_retry_or_panic(
-    pool: &sqlx::Pool<sqlx::Postgres>,
-    query: &str,
-    substitution_items: &[String],
-    retry_count: usize,
-) -> anyhow::Result<Vec<sqlx::postgres::PgRow>> {
-    let mut interval = crate::INTERVAL;
-    let mut retry_attempt = 0usize;
-
-    loop {
-        if retry_attempt == retry_count {
-            return Err(anyhow::anyhow!(
-                "Failed to perform query to database after {} attempts. Stop trying.",
-                retry_count
-            ));
-        }
-        retry_attempt += 1;
-
-        let mut args = sqlx::postgres::PgArguments::default();
-        for item in substitution_items {
-            args.add(item);
-        }
-
-        match sqlx::query_with(query, args).fetch_all(pool).await {
-            Ok(res) => return Ok(res),
-            Err(async_error) => {
-                // todo we print here select with non-filled placeholders. It would be better to get the final select statement here
-                tracing::warn!(
-                    target: crate::LOGGING_PREFIX,
-                         "Error occurred during {}:\nFailed SELECT:\n{}\n Retrying in {} milliseconds...",
-                         async_error,
-                    query,
-                         interval.as_millis(),
-                     );
-                tokio::time::sleep(interval).await;
-                if interval < crate::MAX_DELAY_TIME {
-                    interval *= 2;
-                }
-            }
-        }
-    }
 }
 
 // Generates `($1, $2), ($3, $4)`

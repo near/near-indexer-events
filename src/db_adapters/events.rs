@@ -1,26 +1,16 @@
 use crate::db_adapters::event_types;
-use crate::db_adapters::{coin, contracts, nft};
+use crate::db_adapters::{coin, nft};
 use futures::try_join;
 use near_lake_framework::near_indexer_primitives;
 
 pub(crate) async fn store_events(
     pool: &sqlx::Pool<sqlx::Postgres>,
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     streamer_message: &near_indexer_primitives::StreamerMessage,
-    ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<()> {
     try_join!(
-        coin::store_ft(
-            pool,
-            json_rpc_client,
-            streamer_message,
-            ft_balance_cache,
-            contracts
-        ),
-        nft::store_nft(pool, streamer_message, contracts),
+        coin::store_ft(pool, streamer_message,),
+        nft::store_nft(pool, streamer_message),
     )?;
-    contracts.update_db(pool).await?;
     Ok(())
 }
 
