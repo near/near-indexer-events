@@ -14,7 +14,7 @@ use opentelemetry::{
 };
 use opentelemetry_prometheus::PrometheusExporter;
 use prometheus::{Encoder, TextEncoder};
-use std::convert::Infallible;
+use std::{convert::Infallible, env};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -111,8 +111,13 @@ pub async fn init_metrics_server() -> Result<(), Box<dyn std::error::Error + Sen
         }
     });
 
-    let addr = ([127, 0, 0, 1], 3000).into();
+    let port: u16 = match env::var("PORT") {
+        Ok(val) => val.parse::<u16>().unwrap(), 
+        _ => 3000,
+    };
 
+    let addr = ([127, 0, 0, 1], port).into();
+    
     let server = Server::bind(&addr).serve(make_svc);
 
     println!("Starting metrics server at http://{}", addr);
