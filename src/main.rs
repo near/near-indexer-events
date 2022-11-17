@@ -4,9 +4,10 @@ use clap::Parser;
 use dotenv::dotenv;
 use futures::StreamExt;
 use std::env;
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, task};
 use tracing_subscriber::EnvFilter;
 use tracing_utils::DefaultSubcriberGuard;
+use metrics_server::init_metrics_server;
 
 use crate::configs::Opts;
 use near_lake_framework::near_indexer_primitives;
@@ -15,6 +16,7 @@ mod db_adapters;
 mod models;
 mod rpc_helpers;
 mod tracing_utils;
+mod metrics_server;
 
 pub(crate) const LOGGING_PREFIX: &str = "indexer_events";
 
@@ -45,7 +47,13 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
 
     let _writer_guard = init_tracing();
-
+    
+    task::spawn_blocking(move || {
+        if let Err(val) = init_metrics_server() {
+            tracing::error!(target: LOGGING_PREFIX, "Error setting up the metrics server. -> {}", val)
+        }
+    });
+    
     let (lake_handle, stream) = near_lake_framework::streamer(config);
     let json_rpc_client = near_jsonrpc_client::JsonRpcClient::connect(&opts.near_archival_rpc_url);
 

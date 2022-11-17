@@ -1550,6 +1550,7 @@ dependencies = [
  "near-primitives",
  "num-traits",
  "opentelemetry",
+ "opentelemetry-prometheus",
  "primitive-types",
  "prometheus",
  "quote",
@@ -2169,6 +2170,17 @@ checksum = "69d6c3d7288a106c0a363e4b0e8d308058d56902adefb16f4936f417ffef086e"
 dependencies = [
  "opentelemetry_api",
  "opentelemetry_sdk",
+]
+
+[[package]]
+name = "opentelemetry-prometheus"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06c3d833835a53cf91331d2cfb27e9121f5a95261f31f08a1f79ab31688b8da8"
+dependencies = [
+ "opentelemetry",
+ "prometheus",
+ "protobuf",
 ]
 
 [[package]]
