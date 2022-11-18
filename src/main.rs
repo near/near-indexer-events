@@ -15,6 +15,7 @@ mod metrics_server;
 mod models;
 mod rpc_helpers;
 mod tracing_utils;
+use aws_sdk_s3;
 #[macro_use]
 extern crate lazy_static;
 
@@ -37,15 +38,15 @@ async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     let opts: Opts = Opts::parse();
 
+    let s3_config = aws_sdk_s3::config::Builder::from(&opts.lake_aws_sdk_config()).build();
+    let config_builder = near_lake_framework::LakeConfigBuilder::default().s3_config(s3_config);
+    
+    let config = 
+        config_builder
+            .mainnet()
+            .start_block_height(opts.start_block_height).build()?;
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
-
-    let config = near_lake_framework::LakeConfigBuilder::default()
-        .s3_bucket_name(opts.s3_bucket_name)
-        .s3_region_name(opts.s3_region_name)
-        .start_block_height(opts.start_block_height)
-        .blocks_preload_pool_size(100)
-        .build()?;
-
+    
     let env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
     let _subscriber = tracing_utils::init_tracing(env_filter).await;
 
