@@ -111,7 +111,8 @@ pub async fn init_metrics_server() -> Result<(), Box<dyn std::error::Error + Sen
         }
     });
 
-    let addr = ([127, 0, 0, 1], 3000).into();
+    //let addr = ([127, 0, 0, 1], 3000).into();
+    let addr = "0.0.0.0:8080".parse().expect("address creation works");
 
     let server = Server::bind(&addr).serve(make_svc);
 

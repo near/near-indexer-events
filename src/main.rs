@@ -54,6 +54,11 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     
+    // if let Err(val) = init_metrics_server() {
+    //     tracing::error!(target: LOGGING_PREFIX, "Error setting up the metrics server. -> {}", val)
+    // }
+    
+    
     let (lake_handle, stream) = near_lake_framework::streamer(config);
     let json_rpc_client = near_jsonrpc_client::JsonRpcClient::connect(&opts.near_archival_rpc_url);
 
