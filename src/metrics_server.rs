@@ -83,7 +83,7 @@ pub async fn init_metrics_server() -> std::result::Result<(), ()> {
         _ => 3000,
     };
 
-    let addr = ([127, 0, 0, 1], port).into();
+    let addr = ([0, 0, 0, 0], port).into();
 
     let server = Server::bind(&addr).serve(make_svc);
 
