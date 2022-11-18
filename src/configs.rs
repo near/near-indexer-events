@@ -16,14 +16,14 @@ pub(crate) struct Opts {
     #[clap(long)]
     pub debug: bool,
     /// AWS S3 bucket name to get the stream from
-    #[clap(long)]
+    #[clap(long, env="s3_bucket_name")]
     pub s3_bucket_name: String,
     /// AWS S3 bucket region
-    #[clap(long)]
+    #[clap(long, env="s3_region_name")]
     pub s3_region_name: String,
     /// Block height to start the stream from
-    #[clap(long, short)]
+    #[clap(long, short, env="start_block_height")]
     pub start_block_height: u64,
-    #[clap(long, short)]
+    #[clap(long, short, env="near_archival_rpc_url")]
     pub near_archival_rpc_url: String,
 }
