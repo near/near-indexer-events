@@ -30,16 +30,14 @@ syn = "1.0.90"
 tempfile = "3.3.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1" }
-tracing = "0.1.35"
-tracing-subscriber = { version = "0.3.11", features = ["fmt", "std", "env-filter"] }
+tracing = { version = "0.1.36", features = ["std"] }
 tracing-appender = "0.2.2"
+prometheus = "0.13.1"
+atty = "0.2"
 quote = "1.0.17"
-
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 near-jsonrpc-primitives = "0.14.0"
 near-jsonrpc-client = "0.4.0-beta.0"
 near-lake-framework = "0.5.0"
 near-primitives = "0.14.0"
 hyper = { version = "0.14", features = ["full"] }
-prometheus = "0.13.1"
-opentelemetry = { version = "0.18.0", features = ["rt-tokio", "metrics"] }
-opentelemetry-prometheus = "0.11.0"
