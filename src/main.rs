@@ -4,10 +4,16 @@ use cached::SizedCache;
 use clap::Parser;
 use dotenv::dotenv;
 use futures::StreamExt;
-use metrics_server::{init_metrics_server, BLOCK_PROCESSED_TOTAL, BLOCK_PROCESSING_TIME};
+use metrics_server::{
+    init_metrics_server, BLOCK_PROCESSED_TOTAL, LATEST_BLOCK_HEIGHT, LATEST_BLOCK_TIMESTAMP,
+};
 use near_lake_framework::near_indexer_primitives;
-use std::{env, time::SystemTime};
+use std::{
+    env,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::{sync::Mutex, task};
+use aws_sdk_s3;
 use tracing_subscriber::EnvFilter;
 mod configs;
 mod db_adapters;
@@ -15,7 +21,6 @@ mod metrics_server;
 mod models;
 mod rpc_helpers;
 mod tracing_utils;
-use aws_sdk_s3;
 #[macro_use]
 extern crate lazy_static;
 
@@ -40,13 +45,13 @@ async fn main() -> anyhow::Result<()> {
 
     let s3_config = aws_sdk_s3::config::Builder::from(&opts.lake_aws_sdk_config()).build();
     let config_builder = near_lake_framework::LakeConfigBuilder::default().s3_config(s3_config);
-    
-    let config = 
-        config_builder
-            .mainnet()
-            .start_block_height(opts.start_block_height).build()?;
+
+    let config = config_builder
+        .mainnet()
+        .start_block_height(opts.start_block_height)
+        .build()?;
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
-    
+
     let env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
     let _subscriber = tracing_utils::init_tracing(env_filter).await;
 
@@ -115,8 +120,6 @@ async fn handle_streamer_message(
     ft_balance_cache: &FtBalanceCache,
     contracts: &db_adapters::contracts::ContractsHelper,
 ) -> anyhow::Result<u64> {
-    let request_start = SystemTime::now();
-
     if streamer_message.block.header.height % 100 == 0 {
         tracing::info!(
             target: crate::LOGGING_PREFIX,
@@ -135,7 +138,12 @@ async fn handle_streamer_message(
     )
     .await?;
 
+    let time_since_the_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Something went wrong.");
+
+    LATEST_BLOCK_HEIGHT.set(streamer_message.block.header.height.try_into().unwrap());
+    LATEST_BLOCK_TIMESTAMP.set(time_since_the_epoch.as_secs_f64());
     BLOCK_PROCESSED_TOTAL.inc();
-    BLOCK_PROCESSING_TIME.observe(request_start.elapsed().map_or(0.0, |d| d.as_secs_f64()));
     Ok(streamer_message.block.header.height)
 }
