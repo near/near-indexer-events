@@ -16,22 +16,24 @@ pub(crate) struct Opts {
     #[clap(long)]
     pub debug: bool,
     /// AWS S3 bucket name to get the stream from
-    #[clap(long, env = "s3_bucket_name")]
+    #[clap(long, env)]
     pub s3_bucket_name: String,
     /// AWS Access Key with the rights to read from AWS S3
-    #[clap(long, env = "NEAR_LAKE_AWS_KEY")]
+    #[clap(long, env)]
     pub lake_aws_access_key: String,
-    #[clap(long, env = "NEAR_LAKE_AWS_SECRET")]
+    #[clap(long, env)]
     /// AWS Secret Access Key with the rights to read from AWS S3
     pub lake_aws_secret_access_key: String,
     /// AWS S3 bucket region
-    #[clap(long, env = "s3_region_name")]
+    #[clap(long, env)]
     pub s3_region_name: String,
     /// Block height to start the stream from
-    #[clap(long, short, env = "start_block_height")]
+    #[clap(long, short, env)]
     pub start_block_height: u64,
-    #[clap(long, short, env = "near_archival_rpc_url")]
+    #[clap(long, short, env)]
     pub near_archival_rpc_url: String,
+    #[clap(long,env)]
+    pub chain_id: String,
 }
 
 impl Opts {
