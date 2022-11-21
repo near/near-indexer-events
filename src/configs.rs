@@ -19,10 +19,10 @@ pub(crate) struct Opts {
     #[clap(long, env)]
     pub s3_bucket_name: String,
     /// AWS Access Key with the rights to read from AWS S3
-    #[clap(long, env = "NEAR_LAKE_AWS_KEY")]
+    #[clap(long, env)]
     pub lake_aws_access_key: String,
     /// AWS Secret Access Key with the rights to read from AWS S3
-    #[clap(long, env = "NEAR_LAKE_AWS_SECRET")]
+    #[clap(long, env)]
     pub lake_aws_secret_access_key: String,
     /// AWS S3 bucket region
     #[clap(long, env)]
