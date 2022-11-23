@@ -10,7 +10,6 @@ pub type Result<T, E> = std::result::Result<T, E>;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-
 pub fn try_create_int_counter(name: &str, help: &str) -> Result<IntCounter, prometheus::Error> {
     let opts = Opts::new(name, help);
     let counter = IntCounter::with_opts(opts)?;
@@ -36,12 +35,16 @@ lazy_static! {
     pub static ref BLOCK_PROCESSED_TOTAL: IntCounter =
         try_create_int_counter("total_blocks_processed", "Total number of blocks processed")
             .unwrap();
-    pub static ref LATEST_BLOCK_HEIGHT: IntGauge =
-    try_create_int_gauge("latest_block_height", "Latest Block Height Of Indexer Thus Far")
-        .unwrap();
-    pub static ref LATEST_BLOCK_TIMESTAMP: Gauge =
-    try_create_gauge("latest_block_timestamp", "Timestamp of when last block was indexed.")
-        .unwrap();
+    pub static ref LATEST_BLOCK_HEIGHT: IntGauge = try_create_int_gauge(
+        "latest_block_height",
+        "Latest Block Height Of Indexer Thus Far"
+    )
+    .unwrap();
+    pub static ref LATEST_BLOCK_TIMESTAMP: Gauge = try_create_gauge(
+        "latest_block_timestamp",
+        "Timestamp of when last block was indexed."
+    )
+    .unwrap();
 }
 
 enum ProbeResult {
@@ -107,14 +110,13 @@ async fn serve_req(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
                 }
             };
 
-
             if latest_block_timestamp != 0.0 {
                 res.push_str("\n Last block height was: ");
                 res.push_str(last_known_blockheight.to_string().as_str());
                 res.push_str("\n last block was indexed at timestamp: ");
                 let last_block_datetime =
                     NaiveDateTime::from_timestamp_opt(latest_block_timestamp as i64, 0);
-    
+
                 match last_block_datetime {
                     Some(datetime) => {
                         let dt = DateTime::<Utc>::from_utc(datetime, Utc);
@@ -122,7 +124,6 @@ async fn serve_req(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
                     }
                     None => res.push_str("Error Converting time."),
                 }
-
             }
 
             Response::builder()
@@ -149,7 +150,7 @@ pub async fn init_metrics_server() -> std::result::Result<(), ()> {
     // For every connection, we must make a `Service` to handle all
     // incoming HTTP requests on said connection.
     let make_svc = make_service_fn(move |_conn| async move {
-        Ok::<_, Infallible>(service_fn(move |req| serve_req(req)))
+        Ok::<_, Infallible>(service_fn(serve_req))
     });
 
     let port: u16 = match env::var("PORT") {

@@ -32,7 +32,7 @@ pub(crate) struct Opts {
     pub start_block_height: u64,
     #[clap(long, short, env)]
     pub near_archival_rpc_url: String,
-    #[clap(long,env)]
+    #[clap(long, env)]
     pub chain_id: String,
 }
 

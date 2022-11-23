@@ -1,6 +1,5 @@
 // TODO cleanup imports in all the files in the end
 use crate::configs::Opts;
-use aws_sdk_s3;
 use cached::SizedCache;
 use clap::Parser;
 use dotenv::dotenv;
@@ -47,20 +46,20 @@ async fn main() -> anyhow::Result<()> {
     let config_builder = near_lake_framework::LakeConfigBuilder::default().s3_config(s3_config);
 
     let config = match opts.chain_id.as_str() {
-        "mainnet"=> config_builder.mainnet(),
+        "mainnet" => config_builder.mainnet(),
         "testnet" => config_builder.testnet(),
-        _ => panic!()
+        _ => panic!(),
     }
     .start_block_height(opts.start_block_height)
     .build()?;
 
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
-    
+
     let env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
     let _subscriber = tracing_utils::init_tracing(env_filter).await;
-    
-    tracing::info!(target: LOGGING_PREFIX,"Chain_id: {}",  opts.chain_id );
-    
+
+    tracing::info!(target: LOGGING_PREFIX, "Chain_id: {}", opts.chain_id);
+
     task::spawn_blocking(move || {
         if let Err(_val) = init_metrics_server() {
             tracing::error!(
