@@ -44,3 +44,4 @@ hyper = { version = "0.14", features = ["full"] }
 aws-types= "0.13.0"
 aws-sdk-s3="0.13.0"
 chrono="0.4.23"
+tracing-bunyan-formatter = "0.3.4"

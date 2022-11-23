@@ -6,6 +6,7 @@ use tracing_subscriber::filter::Filtered;
 use tracing_subscriber::layer::{Layered, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{fmt, EnvFilter, Layer};
+use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 
 type LogLayer<Inner> = Layered<
     Filtered<
@@ -61,7 +62,7 @@ where
         .with_filter(filter);
 
     subscriber.with(layer)
-}
+}   
 
 pub fn default_subscriber_with_non_blocking_layer(
     env_filter: EnvFilter,
@@ -71,11 +72,18 @@ pub fn default_subscriber_with_non_blocking_layer(
     let stderr = std::io::stderr();
     let lined_stderr = std::io::LineWriter::new(stderr);
     let (writer, writer_guard) = tracing_appender::non_blocking(lined_stderr);
-
+    
+    let formatting_layer = BunyanFormattingLayer::new("indexer-events".into(), std::io::stdout);
+    
+       
     let subscriber = tracing_subscriber::registry();
 
     let subscriber = add_non_blocking_log_layer(env_filter, writer, color_output, subscriber);
-
+    
+    let subscriber = subscriber
+                                                            .with(JsonStorageLayer)
+                                                            .with(formatting_layer);
+                                                            
     DefaultSubscriberGuard {
         subscriber: Some(subscriber),
         writer_guard: Some(writer_guard),
