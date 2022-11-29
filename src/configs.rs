@@ -37,7 +37,7 @@ pub(crate) struct Opts {
     pub chain_id: String,
     /// Port to enable metrics/health service
     #[clap(long, short, env)]
-    pub http_port: u16,
+    pub port: u16,
 }
 
 impl Opts {

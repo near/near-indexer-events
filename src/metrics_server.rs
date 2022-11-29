@@ -75,10 +75,10 @@ async fn health_check() -> impl Responder {
 }
 
 pub(crate) async fn init_metrics_server() -> anyhow::Result<(), std::io::Error> {
-    let port: u16 = std::env::var("HTTP_PORT")
+    let port: u16 = std::env::var("PORT")
         .unwrap_or_else(|_| String::from("3000"))
         .parse()
-        .expect("Unable to parse `HTTP_PORT`");
+        .expect("Unable to parse `PORT`");
 
     tracing::info!(
         target: LOGGING_PREFIX,
