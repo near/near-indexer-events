@@ -1,7 +1,7 @@
 use bigdecimal::BigDecimal;
 
 use crate::db_adapters::event_types::Nep171Event;
-use crate::db_adapters::{contracts, Event};
+use crate::db_adapters::Event;
 use crate::db_adapters::{events, get_status, nft};
 use crate::models::nft_events::NftEvent;
 use near_lake_framework::near_indexer_primitives;
@@ -14,28 +14,16 @@ pub(crate) async fn collect_nep171_events(
     shard_id: &near_indexer_primitives::types::ShardId,
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<NftEvent>> {
     let mut res = Vec::new();
     for outcome in receipt_execution_outcomes {
-        let events = events::extract_events(outcome);
-        if !events.is_empty()
-            && contracts
-                .is_contract_inconsistent(&outcome.receipt.receiver_id)
-                .await
-        {
-            continue;
-        }
-
-        for event in events {
+        for event in events::extract_events(outcome) {
             if let event_types::NearEvent::Nep171(nft_events) = event {
                 compose_nft_db_events(&nft_events, outcome, block_header)?;
             }
         }
     }
 
-    nft::register_new_contracts(&mut res, contracts).await?;
-    // filter_inconsistent_events(&mut res, json_rpc_client, contracts).await?;
     nft::enumerate_events(&mut res, shard_id, block_header.timestamp, &Event::Nep171)?;
     Ok(res)
 }

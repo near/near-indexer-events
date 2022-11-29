@@ -6,7 +6,6 @@ use near_lake_framework::near_indexer_primitives::views::ExecutionStatusView;
 use std::str::FromStr;
 
 mod coin;
-pub(crate) mod contracts;
 mod event_types;
 pub(crate) mod events;
 mod nft;

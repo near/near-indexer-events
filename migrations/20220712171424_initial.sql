@@ -40,8 +40,6 @@ CREATE TABLE coin_events
     affected_account_id text           NOT NULL,
     involved_account_id text,
     delta_amount        numeric(40, 0) NOT NULL,
-    absolute_amount     numeric(40, 0) NOT NULL,
---     coin_id             text           NOT NULL,
     cause               text           NOT NULL,
     status              text           NOT NULL,
     -- Optional message associated with token movement.
@@ -64,5 +62,6 @@ CREATE TABLE contracts
     first_event_at_timestamp            numeric(20, 0) NOT NULL,
     first_event_at_block_height         numeric(20, 0) NOT NULL,
     inconsistency_found_at_timestamp    numeric(20, 0),
-    inconsistency_found_at_block_height numeric(20, 0)
+    inconsistency_found_at_block_height numeric(20, 0),
+    inconsistency_found_for_account_id  text
 );
