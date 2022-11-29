@@ -36,8 +36,7 @@ async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     let opts: Opts = Opts::parse();
 
-    let s3_config = aws_sdk_s3::config::Builder::from(&opts.lake_aws_sdk_config()).build();
-    let config_builder = near_lake_framework::LakeConfigBuilder::default().s3_config(s3_config);
+    let config_builder = near_lake_framework::LakeConfigBuilder::default();
 
     let config = match opts.chain_id.as_str() {
         "mainnet" => config_builder.mainnet(),
@@ -93,16 +92,14 @@ async fn handle_streamer_message(
             streamer_message.shards.len()
         );
     }
+    LAST_SEEN_BLOCK_HEIGHT.set(streamer_message.block.header.height.try_into().unwrap());
+    let now = Utc::now();
+    let block_timestamp = from_timestamp(streamer_message.block.header.timestamp_nanosec);
+    LATEST_BLOCK_TIMESTAMP_DIFF.set((now - block_timestamp).num_seconds() as f64);
 
     db_adapters::events::store_events(pool, &streamer_message).await?;
 
-    let now = Utc::now();
-    let block_timestamp = from_timestamp(streamer_message.block.header.timestamp_nanosec);
-
-    LATEST_BLOCK_TIMESTAMP_DIFF.set((now - block_timestamp).num_seconds() as f64);
-    LAST_SEEN_BLOCK_HEIGHT.set(streamer_message.block.header.height.try_into().unwrap());
     BLOCK_PROCESSED_TOTAL.inc();
-
     Ok(streamer_message.block.header.height)
 }
 

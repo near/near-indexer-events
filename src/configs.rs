@@ -39,25 +39,3 @@ pub(crate) struct Opts {
     #[clap(long, short, env)]
     pub port: u16,
 }
-
-impl Opts {
-    // Creates AWS Credentials for NEAR Lake
-    fn lake_credentials(&self) -> aws_types::credentials::SharedCredentialsProvider {
-        let provider = aws_types::Credentials::new(
-            self.lake_aws_access_key.clone(),
-            self.lake_aws_secret_access_key.clone(),
-            None,
-            None,
-            "events_indexer",
-        );
-        aws_types::credentials::SharedCredentialsProvider::new(provider)
-    }
-
-    /// Creates AWS Shared Config for NEAR Lake
-    pub fn lake_aws_sdk_config(&self) -> aws_types::sdk_config::SdkConfig {
-        aws_types::sdk_config::SdkConfig::builder()
-            .credentials_provider(self.lake_credentials())
-            .region(aws_types::region::Region::new(self.s3_region_name.clone()))
-            .build()
-    }
-}
