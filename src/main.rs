@@ -13,6 +13,7 @@ use near_primitives::utils::from_timestamp;
 use std::env;
 use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
+use tracing_utils::DefaultSubcriberGuard;
 mod configs;
 mod db_adapters;
 mod metrics_server;
@@ -54,8 +55,7 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
 
-    let env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
-    let _subscriber = tracing_utils::init_tracing(env_filter).await;
+    let _writer_guard = init_tracing();
 
     tracing::info!(target: LOGGING_PREFIX, "Chain_id: {}", opts.chain_id);
 
@@ -144,4 +144,39 @@ async fn handle_streamer_message(
     BLOCK_PROCESSED_TOTAL.inc();
 
     Ok(streamer_message.block.header.height)
+}
+
+fn init_tracing() -> DefaultSubcriberGuard {
+    let mut env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
+
+    if let Ok(rust_log) = env::var("RUST_LOG") {
+        if !rust_log.is_empty() {
+            for directive in rust_log.split(',').filter_map(|s| match s.parse() {
+                Ok(directive) => Some(directive),
+                Err(err) => {
+                    tracing::warn!(
+                        target: crate::LOGGING_PREFIX,
+                        "Ignoring directive `{}`: {}",
+                        s,
+                        err
+                    );
+                    None
+                }
+            }) {
+                env_filter = env_filter.add_directive(directive);
+            }
+        }
+    }
+
+    let (non_blocking_writer, _guard) = tracing_appender::non_blocking(std::io::stderr());
+
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+        .with_env_filter(env_filter)
+        .with_writer(non_blocking_writer)
+        .finish();
+
+    DefaultSubcriberGuard {
+        subscriber_guard: tracing::subscriber::set_default(subscriber),
+        writer_guard: _guard,
+    }
 }
