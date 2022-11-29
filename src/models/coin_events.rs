@@ -14,7 +14,6 @@ pub struct CoinEvent {
     pub affected_account_id: String,
     pub involved_account_id: Option<String>,
     pub delta_amount: BigDecimal,
-    pub absolute_amount: Option<BigDecimal>,
     pub cause: String,
     pub status: String,
     pub event_memo: Option<String>,
@@ -31,7 +30,6 @@ impl crate::models::SqlMethods for CoinEvent {
         args.add(&self.affected_account_id);
         args.add(&self.involved_account_id);
         args.add(&self.delta_amount);
-        args.add(&self.absolute_amount);
         args.add(&self.cause);
         args.add(&self.status);
         args.add(&self.event_memo);

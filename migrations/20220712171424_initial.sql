@@ -40,8 +40,6 @@ CREATE TABLE coin_events
     affected_account_id text           NOT NULL,
     involved_account_id text,
     delta_amount        numeric(40, 0) NOT NULL,
-    -- nullable because the load is too heavy to fill it in the same write process
-    absolute_amount     numeric(40, 0),
     cause               text           NOT NULL,
     status              text           NOT NULL,
     -- Optional message associated with token movement.

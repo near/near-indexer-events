@@ -89,7 +89,6 @@ async fn build_event(
         affected_account_id: custom.affected_id.to_string(),
         involved_account_id: custom.involved_id.map(|id| id.to_string()),
         delta_amount: custom.delta,
-        absolute_amount: None, // initialized by other app
         // coin_id: "".to_string(),
         cause: custom.cause,
         status: crate::db_adapters::get_status(&base.status),
