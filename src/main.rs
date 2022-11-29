@@ -6,7 +6,6 @@ use futures::StreamExt;
 use std::env;
 use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
-use tracing_utils::DefaultSubcriberGuard;
 
 use crate::configs::Opts;
 use near_lake_framework::near_indexer_primitives;
@@ -44,7 +43,8 @@ async fn main() -> anyhow::Result<()> {
         .blocks_preload_pool_size(100)
         .build()?;
 
-    let _writer_guard = init_tracing();
+    let env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
+    let _subscriber = tracing_utils::init_tracing(env_filter).await;
 
     let (lake_handle, stream) = near_lake_framework::streamer(config);
     let json_rpc_client = near_jsonrpc_client::JsonRpcClient::connect(&opts.near_archival_rpc_url);
@@ -120,39 +120,4 @@ async fn handle_streamer_message(
     )
     .await?;
     Ok(streamer_message.block.header.height)
-}
-
-fn init_tracing() -> DefaultSubcriberGuard {
-    let mut env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
-
-    if let Ok(rust_log) = env::var("RUST_LOG") {
-        if !rust_log.is_empty() {
-            for directive in rust_log.split(',').filter_map(|s| match s.parse() {
-                Ok(directive) => Some(directive),
-                Err(err) => {
-                    tracing::warn!(
-                        target: crate::LOGGING_PREFIX,
-                        "Ignoring directive `{}`: {}",
-                        s,
-                        err
-                    );
-                    None
-                }
-            }) {
-                env_filter = env_filter.add_directive(directive);
-            }
-        }
-    }
-
-    let (non_blocking_writer, _guard) = tracing_appender::non_blocking(std::io::stderr());
-
-    let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .with_env_filter(env_filter)
-        .with_writer(non_blocking_writer)
-        .finish();
-
-    DefaultSubcriberGuard {
-        subscriber_guard: tracing::subscriber::set_default(subscriber),
-        writer_guard: _guard,
-    }
 }
