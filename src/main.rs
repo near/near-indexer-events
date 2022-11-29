@@ -1,17 +1,16 @@
 // TODO cleanup imports in all the files in the end
 use crate::configs::Opts;
 use cached::SizedCache;
+use chrono::Utc;
 use clap::Parser;
 use dotenv::dotenv;
 use futures::StreamExt;
 use metrics_server::{
-    init_metrics_server, BLOCK_PROCESSED_TOTAL, LATEST_BLOCK_HEIGHT, LATEST_BLOCK_TIMESTAMP,
+    init_metrics_server, BLOCK_PROCESSED_TOTAL, LAST_SEEN_BLOCK_HEIGHT, LATEST_BLOCK_TIMESTAMP_DIFF,
 };
 use near_lake_framework::near_indexer_primitives;
-use std::{
-    env,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use near_primitives::utils::from_timestamp;
+use std::env;
 use tokio::{sync::Mutex, task};
 use tracing_subscriber::EnvFilter;
 mod configs;
@@ -143,12 +142,12 @@ async fn handle_streamer_message(
     )
     .await?;
 
-    let time_since_the_epoch = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Something went wrong.");
+    let now = Utc::now();
+    let block_timestamp = from_timestamp(streamer_message.block.header.timestamp_nanosec);
 
-    LATEST_BLOCK_HEIGHT.set(streamer_message.block.header.height.try_into().unwrap());
-    LATEST_BLOCK_TIMESTAMP.set(time_since_the_epoch.as_secs_f64());
+    LATEST_BLOCK_TIMESTAMP_DIFF.set((now - block_timestamp).num_seconds() as f64);
+    LAST_SEEN_BLOCK_HEIGHT.set(streamer_message.block.header.height.try_into().unwrap());
     BLOCK_PROCESSED_TOTAL.inc();
+
     Ok(streamer_message.block.header.height)
 }

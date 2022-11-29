@@ -17,6 +17,10 @@ type LogLayer<Inner> = Layered<
     Inner,
 >;
 
+/// https://docs.rs/tracing-appender/0.1.1/tracing_appender/non_blocking/struct.WorkerGuard.html
+///
+/// Once dropped, the subscriber is unregistered, and the output is flushed. Any messages output
+/// after this value is dropped will be delivered to a previously active subscriber, if any.
 pub struct DefaultSubscriberGuard<S> {
     // We must first drop the `local_subscriber_guard` so that no new messages are delivered to
     // this subscriber while we take care of flushing the messages already in queue. If dropped the

@@ -6,9 +6,9 @@ use hyper::{
 use prometheus::{Encoder, Gauge, IntCounter, IntGauge, Opts};
 use std::{convert::Infallible, env};
 
+use crate::LOGGING_PREFIX;
+
 pub type Result<T, E> = std::result::Result<T, E>;
-use chrono::{DateTime, NaiveDateTime, Utc};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn try_create_int_counter(name: &str, help: &str) -> Result<IntCounter, prometheus::Error> {
     let opts = Opts::new(name, help);
@@ -35,22 +35,16 @@ lazy_static! {
     pub static ref BLOCK_PROCESSED_TOTAL: IntCounter =
         try_create_int_counter("total_blocks_processed", "Total number of blocks processed")
             .unwrap();
-    pub static ref LATEST_BLOCK_HEIGHT: IntGauge = try_create_int_gauge(
-        "latest_block_height",
-        "Latest Block Height Of Indexer Thus Far"
+    pub static ref LAST_SEEN_BLOCK_HEIGHT: IntGauge = try_create_int_gauge(
+        "last_seen_block_height",
+        "latest block height seen by indexer."
     )
     .unwrap();
-    pub static ref LATEST_BLOCK_TIMESTAMP: Gauge = try_create_gauge(
+    pub static ref LATEST_BLOCK_TIMESTAMP_DIFF: Gauge = try_create_gauge(
         "latest_block_timestamp",
-        "Timestamp of when last block was indexed."
+        "Difference between latest block timestamp and current time."
     )
     .unwrap();
-}
-
-enum ProbeResult {
-    IndexerStarted,
-    IndexerNotStarted,
-    SomethingIsWrong,
 }
 
 async fn serve_req(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
@@ -79,52 +73,16 @@ async fn serve_req(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
                 .unwrap()
         }
         (&Method::GET, "/probe") => {
-            // Indexer should process at least 1 block within 2.5 minutes to report that it is working fine.
+            // shows the last seen block height and difference between last block_timestamp and now
             let encoder = prometheus::TextEncoder::new();
-            let mut probe_result = ProbeResult::IndexerNotStarted;
-            let latest_block_timestamp = LATEST_BLOCK_TIMESTAMP.get();
-            let last_known_blockheight = LATEST_BLOCK_HEIGHT.get() as u64;
+            let latest_block_timestamp_diff = LATEST_BLOCK_TIMESTAMP_DIFF.get();
+            let last_seen_block_height = LAST_SEEN_BLOCK_HEIGHT.get();
 
-            let time_since_the_epoch = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Time went backwards");
-            let time_elapsed = time_since_the_epoch
-                .checked_sub(Duration::from_secs(latest_block_timestamp as u64))
-                .unwrap();
-
-            if latest_block_timestamp != 0.0 {
-                match time_elapsed.as_secs().ge(&Duration::new(150, 0).as_secs()) {
-                    true => probe_result = ProbeResult::SomethingIsWrong,
-                    false => probe_result = ProbeResult::IndexerStarted,
-                }
-            }
             let mut res = "".to_owned();
-
-            match probe_result {
-                ProbeResult::IndexerNotStarted => res.push_str("Indexer has not started yet."),
-                ProbeResult::IndexerStarted => {
-                    res.push_str("Indexer is operating normally. Blocks reported at least every 2.5 minutes.");
-                }
-                ProbeResult::SomethingIsWrong => {
-                    res.push_str("Something is wrong. Indexer has not reported any new blocks within 2.5 minutes.");
-                }
-            };
-
-            if latest_block_timestamp != 0.0 {
-                res.push_str("\n Last block height was: ");
-                res.push_str(last_known_blockheight.to_string().as_str());
-                res.push_str("\n last block was indexed at timestamp: ");
-                let last_block_datetime =
-                    NaiveDateTime::from_timestamp_opt(latest_block_timestamp as i64, 0);
-
-                match last_block_datetime {
-                    Some(datetime) => {
-                        let dt = DateTime::<Utc>::from_utc(datetime, Utc);
-                        res.push_str(&dt.format("%a %b %e %T %Y").to_string());
-                    }
-                    None => res.push_str("Error Converting time."),
-                }
-            }
+            res.push_str("\n Last seen block height: ");
+            res.push_str(last_seen_block_height.to_string().as_str());
+            res.push_str("\n Last seen block timestamp and current time difference (in seconds): ");
+            res.push_str(latest_block_timestamp_diff.to_string().as_str());
 
             Response::builder()
                 .status(200)
@@ -149,9 +107,8 @@ async fn serve_req(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
 pub async fn init_metrics_server() -> std::result::Result<(), ()> {
     // For every connection, we must make a `Service` to handle all
     // incoming HTTP requests on said connection.
-    let make_svc = make_service_fn(move |_conn| async move {
-        Ok::<_, Infallible>(service_fn(serve_req))
-    });
+    let make_svc =
+        make_service_fn(move |_conn| async move { Ok::<_, Infallible>(service_fn(serve_req)) });
 
     let port: u16 = match env::var("PORT") {
         Ok(val) => val.parse::<u16>().unwrap(),
@@ -162,7 +119,7 @@ pub async fn init_metrics_server() -> std::result::Result<(), ()> {
 
     let server = Server::bind(&addr).serve(make_svc);
 
-    println!("Starting metrics server at http://{}/metrics", addr);
+    tracing::info!(target: LOGGING_PREFIX, "Starting metrics server at http://{}/metrics", addr);
 
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);
