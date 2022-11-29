@@ -28,7 +28,7 @@ serde_json = "1.0.55"
 sqlx = { version = "0.5.13", features = ["runtime-tokio-native-tls", "postgres", "bigdecimal", "json"] }
 syn = "1.0.90"
 tempfile = "3.3.0"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.8", features = ["full"] }
 tokio-stream = { version = "0.1" }
 tracing = "0.1.35"
 tracing-subscriber = { version = "0.3.11", features = ["fmt", "std", "env-filter"] }

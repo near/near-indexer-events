@@ -51,14 +51,13 @@ async fn get_metrics() -> impl Responder {
         eprintln!("could not encode metrics: {}", e);
     };
 
-    let res = match String::from_utf8(buffer.clone()) {
+    match String::from_utf8(buffer.clone()) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("custom metrics could not be from_utf8'd: {}", e);
             String::default()
         }
-    };
-    res
+    }
 }
 
 #[get("/probe")]
@@ -77,7 +76,7 @@ async fn health_check() -> impl Responder {
 
 pub(crate) async fn init_metrics_server() -> anyhow::Result<(), std::io::Error> {
     let port: u16 = std::env::var("HTTP_PORT")
-        .unwrap_or_else(|_| String::from("3030"))
+        .unwrap_or_else(|_| String::from("3000"))
         .parse()
         .expect("Unable to parse `HTTP_PORT`");
 

@@ -32,8 +32,12 @@ pub(crate) struct Opts {
     pub start_block_height: u64,
     #[clap(long, short, env)]
     pub near_archival_rpc_url: String,
+    // Chain ID: testnet or mainnet
     #[clap(long, env)]
     pub chain_id: String,
+    /// Port to enable metrics/health service
+    #[clap(long, short, env)]
+    pub http_port: u16,
 }
 
 impl Opts {

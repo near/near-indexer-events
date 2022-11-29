@@ -79,12 +79,6 @@ async fn main() -> anyhow::Result<()> {
     });
     init_metrics_server().await?;
     Ok(())
-    // // propagate errors from the Lake Framework
-    // match lake_handle.await {
-    //     Ok(Ok(())) => Ok(()),
-    //     Ok(Err(e)) => Err(e),
-    //     Err(e) => Err(anyhow::Error::from(e)), // JoinError
-    // }
 }
 
 async fn handle_streamer_message(
