@@ -75,6 +75,8 @@ async fn health_check() -> impl Responder {
         res.push_str(latest_block_timestamp_diff.to_string().as_str());
         res.push_str("\n # of Blocks Processed thus far ");
         res.push_str(num_blocks_processed.to_string().as_str());
+    } else {
+        res.push_str("\n Indexer is starting... ");
     }
     res
 }
@@ -87,11 +89,15 @@ pub(crate) async fn init_metrics_server() -> anyhow::Result<(), std::io::Error> 
 
     tracing::info!(
         target: LOGGING_PREFIX,
-        "Starting metrics server on http://0.0.0.0:{port}"
+        "Starting metrics server on http://0.0.0.0:{port}/metrics"
     );
 
-    HttpServer::new(|| App::new().service(get_metrics)
-        .service(health_check))
+    tracing::info!(
+        target: LOGGING_PREFIX,
+        "health probe on http://0.0.0.0:{port}/probe"
+    );
+
+    HttpServer::new(|| App::new().service(get_metrics).service(health_check))
         .bind(("0.0.0.0", port))?
         .run()
         .await

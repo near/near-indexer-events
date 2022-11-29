@@ -1,6 +1,6 @@
 // TODO cleanup imports in all the files in the end
 use crate::configs::Opts;
-use chrono::Utc;
+use near_primitives::time::Utc;
 use clap::Parser;
 use dotenv::dotenv;
 use futures::StreamExt;
@@ -11,12 +11,11 @@ use near_lake_framework::near_indexer_primitives;
 use near_primitives::utils::from_timestamp;
 use std::env;
 use tracing_subscriber::EnvFilter;
-use tracing_utils::DefaultSubcriberGuard;
 mod configs;
 mod db_adapters;
 mod metrics_server;
 mod models;
-mod tracing_utils;
+
 #[macro_use]
 extern crate lazy_static;
 
@@ -47,36 +46,21 @@ async fn main() -> anyhow::Result<()> {
     .build()?;
 
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
-
-    let _writer_guard = init_tracing();
+    init_tracing();
 
     tracing::info!(target: LOGGING_PREFIX, "Chain_id: {}", opts.chain_id);
 
     let (_lake_handle, stream) = near_lake_framework::streamer(config);
-
     tokio::spawn(async move {
         let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
             .map(|streamer_message| handle_streamer_message(streamer_message, &pool))
             .buffer_unordered(1usize);
 
-        // let mut time_now = std::time::Instant::now();
         while let Some(_handle_message) = handlers.next().await {}
-        //     match handle_message {
-        //         Ok(_block_height) => {
-        //             // let elapsed = time_now.elapsed();
-        //             // println!(
-        //             //     "Elapsed time spent on block {}: {:.3?}",
-        //             //     block_height, elapsed
-        //             // );
-        //             // time_now = std::time::Instant::now();
-        //         }
-        //         Err(e) => {
-        //             return Err(anyhow::anyhow!(e));
-        //         }
-        //     }
-        // }
     });
+
     init_metrics_server().await?;
+
     Ok(())
 }
 
@@ -103,7 +87,7 @@ async fn handle_streamer_message(
     Ok(streamer_message.block.header.height)
 }
 
-fn init_tracing() -> DefaultSubcriberGuard {
+fn init_tracing() {
     let mut env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
 
     if let Ok(rust_log) = env::var("RUST_LOG") {
@@ -125,15 +109,8 @@ fn init_tracing() -> DefaultSubcriberGuard {
         }
     }
 
-    let (non_blocking_writer, _guard) = tracing_appender::non_blocking(std::io::stderr());
-
-    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+    tracing_subscriber::FmtSubscriber::builder()
         .with_env_filter(env_filter)
-        .with_writer(non_blocking_writer)
-        .finish();
-
-    DefaultSubcriberGuard {
-        subscriber_guard: tracing::subscriber::set_default(subscriber),
-        writer_guard: _guard,
-    }
+        .with_writer(std::io::stderr)
+        .init();
 }
