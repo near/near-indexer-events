@@ -11,7 +11,7 @@ use metrics_server::{
 use near_lake_framework::near_indexer_primitives;
 use near_primitives::utils::from_timestamp;
 use std::env;
-use tokio::{sync::Mutex, task};
+use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
 mod configs;
 mod db_adapters;
@@ -59,15 +59,6 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!(target: LOGGING_PREFIX, "Chain_id: {}", opts.chain_id);
 
-    task::spawn_blocking(move || {
-        if let Err(_val) = init_metrics_server() {
-            tracing::error!(
-                target: LOGGING_PREFIX,
-                "Error setting up the metrics server."
-            );
-        }
-    });
-
     let (lake_handle, stream) = near_lake_framework::streamer(config);
     let json_rpc_client = near_jsonrpc_client::JsonRpcClient::connect(&opts.near_archival_rpc_url);
 
@@ -80,41 +71,44 @@ async fn main() -> anyhow::Result<()> {
         db_adapters::contracts::ContractsHelper::restore_from_db(&pool, opts.start_block_height)
             .await?;
 
-    let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
-        .map(|streamer_message| {
-            handle_streamer_message(
-                streamer_message,
-                &pool,
-                &json_rpc_client,
-                &ft_balance_cache,
-                &contracts,
-            )
-        })
-        .buffer_unordered(1usize);
+    tokio::spawn(async move {
+        let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
+            .map(|streamer_message| {
+                handle_streamer_message(
+                    streamer_message,
+                    &pool,
+                    &json_rpc_client,
+                    &ft_balance_cache,
+                    &contracts,
+                )
+            })
+            .buffer_unordered(1usize);
 
-    // let mut time_now = std::time::Instant::now();
-    while let Some(handle_message) = handlers.next().await {
-        match handle_message {
-            Ok(_block_height) => {
-                // let elapsed = time_now.elapsed();
-                // println!(
-                //     "Elapsed time spent on block {}: {:.3?}",
-                //     block_height, elapsed
-                // );
-                // time_now = std::time::Instant::now();
-            }
-            Err(e) => {
-                return Err(anyhow::anyhow!(e));
-            }
-        }
-    }
-
-    // propagate errors from the Lake Framework
-    match lake_handle.await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(e),
-        Err(e) => Err(anyhow::Error::from(e)), // JoinError
-    }
+        // let mut time_now = std::time::Instant::now();
+        while let Some(_handle_message) = handlers.next().await {}
+        //     match handle_message {
+        //         Ok(_block_height) => {
+        //             // let elapsed = time_now.elapsed();
+        //             // println!(
+        //             //     "Elapsed time spent on block {}: {:.3?}",
+        //             //     block_height, elapsed
+        //             // );
+        //             // time_now = std::time::Instant::now();
+        //         }
+        //         Err(e) => {
+        //             return Err(anyhow::anyhow!(e));
+        //         }
+        //     }
+        // }
+    });
+        init_metrics_server().await?;
+        Ok(())
+    // // propagate errors from the Lake Framework
+    // match lake_handle.await {
+    //     Ok(Ok(())) => Ok(()),
+    //     Ok(Err(e)) => Err(e),
+    //     Err(e) => Err(anyhow::Error::from(e)), // JoinError
+    // }
 }
 
 async fn handle_streamer_message(

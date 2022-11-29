@@ -1,10 +1,5 @@
-use hyper::{
-    header::CONTENT_TYPE,
-    service::{make_service_fn, service_fn},
-    Body, Method, Request, Response, Server,
-};
+use actix_web::{get, App, HttpServer, Responder};
 use prometheus::{Encoder, Gauge, IntCounter, IntGauge, Opts};
-use std::{convert::Infallible, env};
 
 use crate::LOGGING_PREFIX;
 
@@ -47,82 +42,52 @@ lazy_static! {
     .unwrap();
 }
 
-async fn serve_req(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    let response = match (req.method(), req.uri().path()) {
-        (&Method::GET, "/metrics") => {
-            let encoder = prometheus::TextEncoder::new();
+#[get("/metrics")]
+async fn get_metrics() -> impl Responder {
+    let encoder = prometheus::TextEncoder::new();
 
-            let mut buffer = Vec::new();
-            if let Err(e) = encoder.encode(&prometheus::gather(), &mut buffer) {
-                eprintln!("could not encode custom metrics: {}", e);
-            };
-
-            let res = match String::from_utf8(buffer.clone()) {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("custom metrics could not be from_utf8'd: {}", e);
-                    String::default()
-                }
-            };
-            buffer.clear();
-
-            Response::builder()
-                .status(200)
-                .header(CONTENT_TYPE, encoder.format_type())
-                .body(Body::from(res))
-                .unwrap()
-        }
-        (&Method::GET, "/probe") => {
-            // shows the last seen block height and difference between last block_timestamp and now
-            let encoder = prometheus::TextEncoder::new();
-            let latest_block_timestamp_diff = LATEST_BLOCK_TIMESTAMP_DIFF.get();
-            let last_seen_block_height = LAST_SEEN_BLOCK_HEIGHT.get();
-
-            let mut res = "".to_owned();
-            res.push_str("\n Last seen block height: ");
-            res.push_str(last_seen_block_height.to_string().as_str());
-            res.push_str("\n Last seen block timestamp and current time difference (in seconds): ");
-            res.push_str(latest_block_timestamp_diff.to_string().as_str());
-
-            Response::builder()
-                .status(200)
-                .header(CONTENT_TYPE, encoder.format_type())
-                .body(Body::from(res))
-                .unwrap()
-        }
-        (&Method::GET, "/") => Response::builder()
-            .status(200)
-            .body(Body::from("Service is running."))
-            .unwrap(),
-        _ => Response::builder()
-            .status(404)
-            .body(Body::from("Missing Page"))
-            .unwrap(),
+    let mut buffer = Vec::new();
+    if let Err(e) = encoder.encode(&prometheus::gather(), &mut buffer) {
+        eprintln!("could not encode metrics: {}", e);
     };
 
-    Ok(response)
+    let res = match String::from_utf8(buffer.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("custom metrics could not be from_utf8'd: {}", e);
+            String::default()
+        }
+    };
+    res
 }
 
-#[tokio::main]
-pub async fn init_metrics_server() -> std::result::Result<(), ()> {
-    // For every connection, we must make a `Service` to handle all
-    // incoming HTTP requests on said connection.
-    let make_svc =
-        make_service_fn(move |_conn| async move { Ok::<_, Infallible>(service_fn(serve_req)) });
+#[get("/probe")]
+async fn health_check() -> impl Responder {
+    // shows the last seen block height and difference between last block_timestamp and now
+    let latest_block_timestamp_diff = LATEST_BLOCK_TIMESTAMP_DIFF.get();
+    let last_seen_block_height = LAST_SEEN_BLOCK_HEIGHT.get();
 
-    let port: u16 = match env::var("PORT") {
-        Ok(val) => val.parse::<u16>().unwrap(),
-        _ => 3000,
-    };
+    let mut res = "".to_owned();
+    res.push_str("\n Last seen block height: ");
+    res.push_str(last_seen_block_height.to_string().as_str());
+    res.push_str("\n Last seen block timestamp and current time difference (in seconds): ");
+    res.push_str(latest_block_timestamp_diff.to_string().as_str());
+    res
+}
 
-    let addr = ([0, 0, 0, 0], port).into();
+pub(crate) async fn init_metrics_server() -> anyhow::Result<(), std::io::Error> {
+    let port: u16 = std::env::var("HTTP_PORT")
+        .unwrap_or_else(|_| String::from("3030"))
+        .parse()
+        .expect("Unable to parse `HTTP_PORT`");
 
-    let server = Server::bind(&addr).serve(make_svc);
+    tracing::info!(
+        target: LOGGING_PREFIX,
+        "Starting metrics server on http://0.0.0.0:{port}"
+    );
 
-    tracing::info!(target: LOGGING_PREFIX, "Starting metrics server at http://{}/metrics", addr);
-
-    if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
-    }
-    Ok(())
+    HttpServer::new(|| App::new().service(get_metrics))
+        .bind(("0.0.0.0", port))?
+        .run()
+        .await
 }

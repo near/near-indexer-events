@@ -38,9 +38,9 @@ quote = "1.0.17"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 aws-types= "0.13.0"
 aws-sdk-s3="0.13.0"
-chrono="0.4.23"
+chrono = "0.4.19"
 tracing-bunyan-formatter = "0.3.4"
-hyper = { version = "0.14", features = ["full"] }
+actix-web = "=4.0.1"
 
 near-jsonrpc-primitives = "0.14.0"
 near-jsonrpc-client = "0.4.0-beta.0"
