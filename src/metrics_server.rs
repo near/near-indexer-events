@@ -60,7 +60,7 @@ async fn get_metrics() -> impl Responder {
     }
 }
 
-#[get("/probe")]
+#[get("/")]
 async fn health_check() -> impl Responder {
     // shows the last seen block height and difference between last block_timestamp and now
     let latest_block_timestamp_diff = LATEST_BLOCK_TIMESTAMP_DIFF.get();
@@ -85,7 +85,8 @@ pub(crate) async fn init_metrics_server() -> anyhow::Result<(), std::io::Error> 
         "Starting metrics server on http://0.0.0.0:{port}"
     );
 
-    HttpServer::new(|| App::new().service(get_metrics))
+    HttpServer::new(|| App::new().service(get_metrics)
+        .service(health_check))
         .bind(("0.0.0.0", port))?
         .run()
         .await
