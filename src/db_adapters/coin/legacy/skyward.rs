@@ -1,5 +1,5 @@
 use crate::db_adapters;
-use crate::db_adapters::{coin, contracts, numeric_types, Event};
+use crate::db_adapters::{coin, numeric_types, Event};
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
@@ -32,20 +32,11 @@ struct FtRefund {
 }
 
 pub(crate) async fn collect_skyward(
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     shard_id: &near_indexer_primitives::types::ShardId,
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let mut events: Vec<CoinEvent> = vec![];
-    if contracts
-        .is_contract_inconsistent(&AccountId::from_str("token.skyward.near")?)
-        .await
-    {
-        return Ok(vec![]);
-    }
 
     for outcome in receipt_execution_outcomes {
         if outcome.receipt.receiver_id != AccountId::from_str("token.skyward.near")?
@@ -55,41 +46,24 @@ pub(crate) async fn collect_skyward(
         }
         if let ReceiptEnumView::Action { actions, .. } = &outcome.receipt.receipt {
             for action in actions {
-                events.extend(
-                    process_skyward_functions(
-                        json_rpc_client,
-                        block_header,
-                        ft_balance_cache,
-                        action,
-                        outcome,
-                        contracts,
-                    )
-                    .await?,
-                );
+                events.extend(process_skyward_functions(block_header, action, outcome).await?);
             }
         }
     }
-    if !events.is_empty() {
-        coin::register_new_contracts(&mut events, contracts).await?;
-        coin::filter_inconsistent_events(&mut events, json_rpc_client, block_header, contracts)
-            .await?;
-        coin::enumerate_events(
-            &mut events,
-            shard_id,
-            block_header.timestamp,
-            &Event::Skyward,
-        )?;
-    }
+    coin::filter_zeros_and_enumerate_events(
+        &mut events,
+        shard_id,
+        block_header.timestamp,
+        &Event::Skyward,
+    )?;
+
     Ok(events)
 }
 
 async fn process_skyward_functions(
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    cache: &crate::FtBalanceCache,
     action: &ActionView,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let (method_name, args) = match action {
         ActionView::FunctionCall {
@@ -129,15 +103,6 @@ async fn process_skyward_functions(
             }
         };
 
-        // We need to fill in the cache here because at the end of the block we are checking all the balances.
-        // If the cache is empty, we query the state at the previous block.
-        // For `new` method, the previous block may not have the contract deployed
-        let account_with_contract = crate::AccountWithContract {
-            account_id: args.owner_id.clone(),
-            contract_account_id: outcome.execution_outcome.outcome.executor_id.clone(),
-        };
-        coin::balance_utils::save_latest_balance(account_with_contract, 0, cache).await;
-
         let delta = BigDecimal::from_str(&args.total_supply.0.to_string())?;
         let base = db_adapters::get_base(Event::Skyward, outcome, block_header)?;
         let custom = coin::FtEvent {
@@ -147,17 +112,7 @@ async fn process_skyward_functions(
             cause: "MINT".to_string(),
             memo: None,
         };
-        return Ok(vec![
-            coin::build_event(
-                json_rpc_client,
-                cache,
-                block_header,
-                base,
-                custom,
-                contracts,
-            )
-            .await?,
-        ]);
+        return Ok(vec![coin::build_event(base, custom).await?]);
     }
 
     // no examples of MINT calls except `new`
@@ -207,24 +162,8 @@ async fn process_skyward_functions(
             memo,
         };
         return Ok(vec![
-            coin::build_event(
-                json_rpc_client,
-                cache,
-                block_header,
-                base_from,
-                custom_from,
-                contracts,
-            )
-            .await?,
-            coin::build_event(
-                json_rpc_client,
-                cache,
-                block_header,
-                base_to,
-                custom_to,
-                contracts,
-            )
-            .await?,
+            coin::build_event(base_from, custom_from).await?,
+            coin::build_event(base_to, custom_to).await?,
         ]);
     }
 
@@ -283,17 +222,7 @@ async fn process_skyward_functions(
                     cause: "BURN".to_string(),
                     memo,
                 };
-                return Ok(vec![
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base,
-                        custom,
-                        contracts,
-                    )
-                    .await?,
-                ]);
+                return Ok(vec![coin::build_event(base, custom).await?]);
             }
             if log.starts_with("Refund ") {
                 // we should revert ft_transfer_call
@@ -315,24 +244,8 @@ async fn process_skyward_functions(
                     memo,
                 };
                 return Ok(vec![
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base_from,
-                        custom_from,
-                        contracts,
-                    )
-                    .await?,
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base_to,
-                        custom_to,
-                        contracts,
-                    )
-                    .await?,
+                    coin::build_event(base_from, custom_from).await?,
+                    coin::build_event(base_to, custom_to).await?,
                 ]);
             }
         }
@@ -343,9 +256,10 @@ async fn process_skyward_functions(
 
     tracing::error!(
         target: crate::LOGGING_PREFIX,
-        "SKYWARD {} method {}",
+        "SKYWARD {} new method found: {}, receipt {}",
         block_header.height,
-        method_name
+        method_name,
+        outcome.receipt.receipt_id
     );
     Ok(vec![])
 }

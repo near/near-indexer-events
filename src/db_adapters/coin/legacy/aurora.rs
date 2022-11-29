@@ -1,5 +1,5 @@
 use crate::db_adapters;
-use crate::db_adapters::{coin, contracts};
+use crate::db_adapters::coin;
 use crate::db_adapters::{numeric_types, Event};
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
@@ -56,19 +56,10 @@ impl BorshDeserialize for Address {
 }
 
 pub(crate) async fn collect_aurora(
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     shard_id: &near_indexer_primitives::types::ShardId,
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
-    if contracts
-        .is_contract_inconsistent(&AccountId::from_str("aurora")?)
-        .await
-    {
-        return Ok(vec![]);
-    }
     let mut events: Vec<CoinEvent> = vec![];
     for outcome in receipt_execution_outcomes {
         if outcome.receipt.receiver_id != AccountId::from_str("aurora")?
@@ -78,41 +69,23 @@ pub(crate) async fn collect_aurora(
         }
         if let ReceiptEnumView::Action { actions, .. } = &outcome.receipt.receipt {
             for action in actions {
-                events.extend(
-                    process_aurora_functions(
-                        json_rpc_client,
-                        block_header,
-                        ft_balance_cache,
-                        action,
-                        outcome,
-                        contracts,
-                    )
-                    .await?,
-                );
+                events.extend(process_aurora_functions(block_header, action, outcome).await?);
             }
         }
     }
-    if !events.is_empty() {
-        coin::register_new_contracts(&mut events, contracts).await?;
-        coin::filter_inconsistent_events(&mut events, json_rpc_client, block_header, contracts)
-            .await?;
-        coin::enumerate_events(
-            &mut events,
-            shard_id,
-            block_header.timestamp,
-            &Event::Aurora,
-        )?;
-    }
+    coin::filter_zeros_and_enumerate_events(
+        &mut events,
+        shard_id,
+        block_header.timestamp,
+        &Event::Aurora,
+    )?;
     Ok(events)
 }
 
 async fn process_aurora_functions(
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    cache: &crate::FtBalanceCache,
     action: &ActionView,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let (method_name, args, ..) = match action {
         ActionView::FunctionCall {
@@ -178,17 +151,7 @@ async fn process_aurora_functions(
                     cause: "MINT".to_string(),
                     memo: None,
                 };
-                events.push(
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base,
-                        custom,
-                        contracts,
-                    )
-                    .await?,
-                );
+                events.push(coin::build_event(base, custom).await?);
             };
         }
 
@@ -240,24 +203,8 @@ async fn process_aurora_functions(
             memo,
         };
         return Ok(vec![
-            coin::build_event(
-                json_rpc_client,
-                cache,
-                block_header,
-                base_from,
-                custom_from,
-                contracts,
-            )
-            .await?,
-            coin::build_event(
-                json_rpc_client,
-                cache,
-                block_header,
-                base_to,
-                custom_to,
-                contracts,
-            )
-            .await?,
+            coin::build_event(base_from, custom_from).await?,
+            coin::build_event(base_to, custom_to).await?,
         ]);
     }
 
@@ -297,17 +244,7 @@ async fn process_aurora_functions(
                     cause: "TRANSFER".to_string(),
                     memo: None,
                 };
-                events.push(
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base_from,
-                        custom_from,
-                        contracts,
-                    )
-                    .await?,
-                );
+                events.push(coin::build_event(base_from, custom_from).await?);
 
                 let base_to = db_adapters::get_base(Event::Aurora, outcome, block_header)?;
                 let custom_to = coin::FtEvent {
@@ -317,17 +254,7 @@ async fn process_aurora_functions(
                     cause: "TRANSFER".to_string(),
                     memo: None,
                 };
-                events.push(
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base_to,
-                        custom_to,
-                        contracts,
-                    )
-                    .await?,
-                );
+                events.push(coin::build_event(base_to, custom_to).await?);
             };
         }
         return Ok(events);
@@ -361,22 +288,12 @@ async fn process_aurora_functions(
             memo: None,
         };
 
-        return Ok(vec![
-            coin::build_event(
-                json_rpc_client,
-                cache,
-                block_header,
-                base,
-                custom,
-                contracts,
-            )
-            .await?,
-        ]);
+        return Ok(vec![coin::build_event(base, custom).await?]);
     }
 
     tracing::error!(
         target: crate::LOGGING_PREFIX,
-        "AURORA {} method {}, receipt {}",
+        "AURORA {} new method found: {}, receipt {}",
         block_header.height,
         method_name,
         outcome.receipt.receipt_id

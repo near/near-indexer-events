@@ -1,4 +1,3 @@
-use crate::db_adapters::contracts;
 use crate::models::coin_events::CoinEvent;
 use futures::try_join;
 use near_lake_framework::near_indexer_primitives;
@@ -11,63 +10,23 @@ mod wentokensir;
 mod wrap_near;
 
 pub(crate) async fn collect_legacy(
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     shard_id: &near_indexer_primitives::types::ShardId,
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let mut events: Vec<CoinEvent> = vec![];
 
-    let aurora_future = aurora::collect_aurora(
-        json_rpc_client,
-        shard_id,
-        receipt_execution_outcomes,
-        block_header,
-        ft_balance_cache,
-        contracts,
-    );
-    let rainbow_bridge_future = rainbow_bridge::collect_rainbow_bridge(
-        json_rpc_client,
-        shard_id,
-        receipt_execution_outcomes,
-        block_header,
-        ft_balance_cache,
-        contracts,
-    );
-    let skyward_future = skyward::collect_skyward(
-        json_rpc_client,
-        shard_id,
-        receipt_execution_outcomes,
-        block_header,
-        ft_balance_cache,
-        contracts,
-    );
-    let tkn_near_future = tkn_near::collect_tkn_near(
-        json_rpc_client,
-        shard_id,
-        receipt_execution_outcomes,
-        block_header,
-        ft_balance_cache,
-        contracts,
-    );
-    let wentokensir_future = wentokensir::collect_wentokensir(
-        json_rpc_client,
-        shard_id,
-        receipt_execution_outcomes,
-        block_header,
-        ft_balance_cache,
-        contracts,
-    );
-    let wrap_near_future = wrap_near::collect_wrap_near(
-        json_rpc_client,
-        shard_id,
-        receipt_execution_outcomes,
-        block_header,
-        ft_balance_cache,
-        contracts,
-    );
+    let aurora_future = aurora::collect_aurora(shard_id, receipt_execution_outcomes, block_header);
+    let rainbow_bridge_future =
+        rainbow_bridge::collect_rainbow_bridge(shard_id, receipt_execution_outcomes, block_header);
+    let skyward_future =
+        skyward::collect_skyward(shard_id, receipt_execution_outcomes, block_header);
+    let tkn_near_future =
+        tkn_near::collect_tkn_near(shard_id, receipt_execution_outcomes, block_header);
+    let wentokensir_future =
+        wentokensir::collect_wentokensir(shard_id, receipt_execution_outcomes, block_header);
+    let wrap_near_future =
+        wrap_near::collect_wrap_near(shard_id, receipt_execution_outcomes, block_header);
 
     let (
         aurora_events,

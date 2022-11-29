@@ -1,7 +1,7 @@
 use crate::db_adapters::event_types;
 use crate::db_adapters::event_types::Nep141Event;
+use crate::db_adapters::Event;
 use crate::db_adapters::{coin, events, get_base};
-use crate::db_adapters::{contracts, Event};
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
@@ -10,56 +10,33 @@ use std::ops::Mul;
 use std::str::FromStr;
 
 pub(crate) async fn collect_nep141_events(
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     shard_id: &near_indexer_primitives::types::ShardId,
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let mut res = Vec::new();
     for outcome in receipt_execution_outcomes {
         let events = events::extract_events(outcome);
-        if !events.is_empty()
-            && contracts
-                .is_contract_inconsistent(&outcome.receipt.receiver_id)
-                .await
-        {
-            continue;
-        }
         for event in events {
             if let event_types::NearEvent::Nep141(ft_events) = event {
-                res.extend(
-                    compose_db_events(
-                        json_rpc_client,
-                        &ft_events,
-                        outcome,
-                        block_header,
-                        ft_balance_cache,
-                        contracts,
-                    )
-                    .await?,
-                );
+                res.extend(compose_db_events(&ft_events, outcome, block_header).await?);
             }
         }
     }
-    if !res.is_empty() {
-        coin::register_new_contracts(&mut res, contracts).await?;
-        coin::filter_inconsistent_events(&mut res, json_rpc_client, block_header, contracts)
-            .await?;
-        coin::enumerate_events(&mut res, shard_id, block_header.timestamp, &Event::Nep141)?;
-    }
+    coin::filter_zeros_and_enumerate_events(
+        &mut res,
+        shard_id,
+        block_header.timestamp,
+        &Event::Nep141,
+    )?;
 
     Ok(res)
 }
 
 async fn compose_db_events(
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     events: &Nep141Event,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    cache: &crate::FtBalanceCache,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let mut ft_events = Vec::new();
     match &events.event_kind {
@@ -81,17 +58,7 @@ async fn compose_db_events(
                         .as_ref()
                         .map(|s| s.escape_default().to_string()),
                 };
-                ft_events.push(
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base,
-                        custom,
-                        contracts,
-                    )
-                    .await?,
-                );
+                ft_events.push(coin::build_event(base, custom).await?);
             }
         }
         event_types::Nep141EventKind::FtTransfer(transfer_events) => {
@@ -107,17 +74,7 @@ async fn compose_db_events(
                         .as_ref()
                         .map(|s| s.escape_default().to_string()),
                 };
-                ft_events.push(
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base,
-                        custom,
-                        contracts,
-                    )
-                    .await?,
-                );
+                ft_events.push(coin::build_event(base, custom).await?);
 
                 let base = get_base(Event::Nep141, outcome, block_header)?;
                 let custom = coin::FtEvent {
@@ -130,17 +87,7 @@ async fn compose_db_events(
                         .as_ref()
                         .map(|s| s.escape_default().to_string()),
                 };
-                ft_events.push(
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base,
-                        custom,
-                        contracts,
-                    )
-                    .await?,
-                );
+                ft_events.push(coin::build_event(base, custom).await?);
             }
         }
         event_types::Nep141EventKind::FtBurn(burn_events) => {
@@ -156,17 +103,7 @@ async fn compose_db_events(
                         .as_ref()
                         .map(|s| s.escape_default().to_string()),
                 };
-                ft_events.push(
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base,
-                        custom,
-                        contracts,
-                    )
-                    .await?,
-                );
+                ft_events.push(coin::build_event(base, custom).await?);
             }
         }
     }

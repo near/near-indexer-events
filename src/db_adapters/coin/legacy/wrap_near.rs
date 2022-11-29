@@ -1,5 +1,5 @@
 use crate::db_adapters;
-use crate::db_adapters::{coin, contracts, numeric_types, Event};
+use crate::db_adapters::{coin, numeric_types, Event};
 use crate::models::coin_events::CoinEvent;
 use bigdecimal::BigDecimal;
 use near_lake_framework::near_indexer_primitives;
@@ -30,20 +30,11 @@ struct NearWithdraw {
 }
 
 pub(crate) async fn collect_wrap_near(
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     shard_id: &near_indexer_primitives::types::ShardId,
     receipt_execution_outcomes: &[near_indexer_primitives::IndexerExecutionOutcomeWithReceipt],
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    ft_balance_cache: &crate::FtBalanceCache,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let mut events: Vec<CoinEvent> = vec![];
-    if contracts
-        .is_contract_inconsistent(&AccountId::from_str("wrap.near")?)
-        .await
-    {
-        return Ok(vec![]);
-    }
 
     for outcome in receipt_execution_outcomes {
         if outcome.receipt.receiver_id != AccountId::from_str("wrap.near")?
@@ -53,43 +44,26 @@ pub(crate) async fn collect_wrap_near(
         }
         if let ReceiptEnumView::Action { actions, .. } = &outcome.receipt.receipt {
             for action in actions {
-                events.extend(
-                    process_wrap_near_functions(
-                        json_rpc_client,
-                        block_header,
-                        ft_balance_cache,
-                        action,
-                        outcome,
-                        contracts,
-                    )
-                    .await?,
-                );
+                events.extend(process_wrap_near_functions(block_header, action, outcome).await?);
             }
         }
     }
-    if !events.is_empty() {
-        coin::register_new_contracts(&mut events, contracts).await?;
-        coin::filter_inconsistent_events(&mut events, json_rpc_client, block_header, contracts)
-            .await?;
-        coin::enumerate_events(
-            &mut events,
-            shard_id,
-            block_header.timestamp,
-            &Event::WrapNear,
-        )?;
-    }
+    coin::filter_zeros_and_enumerate_events(
+        &mut events,
+        shard_id,
+        block_header.timestamp,
+        &Event::WrapNear,
+    )?;
+
     Ok(events)
 }
 
 // We can't take the info from function call parameters, see https://explorer.near.org/transactions/AAcncdoxDGaoM8TMMRSVuMLfrRvvmAMtU3mDbtB9L6JJ#EahNmkevAXEjXeQfP6sxxi6c53KE1pZpwzNWoXnDWDeS
 // We also can't just parse logs. near_deposit and ft_transfer_call are usually have logs duplicated
 async fn process_wrap_near_functions(
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    cache: &crate::FtBalanceCache,
     action: &ActionView,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let (method_name, args) = match action {
         ActionView::FunctionCall {
@@ -105,6 +79,7 @@ async fn process_wrap_near_functions(
         "ft_balance_of",
         "ft_metadata",
         "ft_total_supply",
+        "new",
     ]
     .contains(&method_name.as_str())
     {
@@ -117,16 +92,7 @@ async fn process_wrap_near_functions(
         // https://explorer.near.org/transactions/AAcncdoxDGaoM8TMMRSVuMLfrRvvmAMtU3mDbtB9L6JJ#EahNmkevAXEjXeQfP6sxxi6c53KE1pZpwzNWoXnDWDeS
         let mut events = vec![];
         for log in &outcome.execution_outcome.outcome.logs {
-            if let Some(mint) = process_mint_log(
-                json_rpc_client,
-                block_header,
-                cache,
-                outcome,
-                log,
-                contracts,
-            )
-            .await?
-            {
+            if let Some(mint) = process_mint_log(block_header, outcome, log).await? {
                 events.push(mint);
             }
             // there are also transfer logs, but they are duplicated, we will catch them in transfer section
@@ -179,24 +145,8 @@ async fn process_wrap_near_functions(
             memo,
         };
         return Ok(vec![
-            coin::build_event(
-                json_rpc_client,
-                cache,
-                block_header,
-                base_from,
-                custom_from,
-                contracts,
-            )
-            .await?,
-            coin::build_event(
-                json_rpc_client,
-                cache,
-                block_header,
-                base_to,
-                custom_to,
-                contracts,
-            )
-            .await?,
+            coin::build_event(base_from, custom_from).await?,
+            coin::build_event(base_to, custom_to).await?,
         ]);
     }
 
@@ -255,17 +205,7 @@ async fn process_wrap_near_functions(
                     cause: "BURN".to_string(),
                     memo,
                 };
-                return Ok(vec![
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base,
-                        custom,
-                        contracts,
-                    )
-                    .await?,
-                ]);
+                return Ok(vec![coin::build_event(base, custom).await?]);
             }
             if log.starts_with("Refund ") {
                 // we should revert ft_transfer_call
@@ -288,24 +228,8 @@ async fn process_wrap_near_functions(
                 };
 
                 return Ok(vec![
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base_from,
-                        custom_from,
-                        contracts,
-                    )
-                    .await?,
-                    coin::build_event(
-                        json_rpc_client,
-                        cache,
-                        block_header,
-                        base_to,
-                        custom_to,
-                        contracts,
-                    )
-                    .await?,
+                    coin::build_event(base_from, custom_from).await?,
+                    coin::build_event(base_to, custom_to).await?,
                 ]);
             }
         }
@@ -340,35 +264,23 @@ async fn process_wrap_near_functions(
             cause: "BURN".to_string(),
             memo: None,
         };
-        return Ok(vec![
-            coin::build_event(
-                json_rpc_client,
-                cache,
-                block_header,
-                base,
-                custom,
-                contracts,
-            )
-            .await?,
-        ]);
+        return Ok(vec![coin::build_event(base, custom).await?]);
     }
 
     tracing::error!(
         target: crate::LOGGING_PREFIX,
-        "WRAP_NEAR {} method {}",
+        "WRAP NEAR {} new method found: {}, receipt {}",
         block_header.height,
-        method_name
+        method_name,
+        outcome.receipt.receipt_id
     );
     Ok(vec![])
 }
 
 async fn process_mint_log(
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
     block_header: &near_indexer_primitives::views::BlockHeaderView,
-    cache: &crate::FtBalanceCache,
     outcome: &near_indexer_primitives::IndexerExecutionOutcomeWithReceipt,
     log: &str,
-    contracts: &contracts::ContractsHelper,
 ) -> anyhow::Result<Option<CoinEvent>> {
     lazy_static::lazy_static! {
         static ref RE: regex::Regex = regex::Regex::new(r"^Deposit (?P<amount>(0|[1-9][0-9]*)) NEAR to (?P<account_id>[a-z0-9_\.\-]+)$").unwrap();
@@ -396,17 +308,7 @@ async fn process_mint_log(
             cause: "MINT".to_string(),
             memo: None,
         };
-        return Ok(Some(
-            coin::build_event(
-                json_rpc_client,
-                cache,
-                block_header,
-                base,
-                custom,
-                contracts,
-            )
-            .await?,
-        ));
+        return Ok(Some(coin::build_event(base, custom).await?));
     }
 
     Ok(None)
