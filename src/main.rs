@@ -35,22 +35,14 @@ async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     let opts: Opts = Opts::parse();
 
-    let config_builder = near_lake_framework::LakeConfigBuilder::default();
-
-    let config = match opts.chain_id.as_str() {
-        "mainnet" => config_builder.mainnet(),
-        "testnet" => config_builder.testnet(),
-        _ => panic!(),
-    }
-    .start_block_height(opts.start_block_height)
-    .build()?;
-
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
+    
     init_tracing();
 
-    tracing::info!(target: LOGGING_PREFIX, "Chain_id: {}", opts.chain_id);
-
+    // create a lake configuration with S3 information passed in as ENV vars
+    let config = opts.get_lake_config().await;
     let (_lake_handle, stream) = near_lake_framework::streamer(config);
+
     tokio::spawn(async move {
         let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
             .map(|streamer_message| handle_streamer_message(streamer_message, &pool))
