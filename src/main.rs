@@ -5,7 +5,6 @@ use dotenv::dotenv;
 use futures::StreamExt;
 use std::env;
 use tokio::sync::Mutex;
-use tracing_subscriber::EnvFilter;
 
 use crate::configs::Opts;
 use near_lake_framework::near_indexer_primitives;
@@ -13,7 +12,6 @@ mod configs;
 mod db_adapters;
 mod models;
 mod rpc_helpers;
-mod tracing_utils;
 
 pub(crate) const LOGGING_PREFIX: &str = "indexer_events";
 
@@ -43,8 +41,7 @@ async fn main() -> anyhow::Result<()> {
         .blocks_preload_pool_size(100)
         .build()?;
 
-    let env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
-    let _subscriber = tracing_utils::init_tracing(env_filter).await;
+    configs::init_tracing(opts.debug)?;
 
     let (lake_handle, stream) = near_lake_framework::streamer(config);
     let json_rpc_client = near_jsonrpc_client::JsonRpcClient::connect(&opts.near_archival_rpc_url);
