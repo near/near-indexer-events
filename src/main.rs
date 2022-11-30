@@ -1,5 +1,5 @@
 // TODO cleanup imports in all the files in the end
-use crate::configs::Opts;
+use crate::configs::{Opts, init_tracing};
 use near_primitives::time::Utc;
 use clap::Parser;
 use dotenv::dotenv;
@@ -10,7 +10,6 @@ use metrics_server::{
 use near_lake_framework::near_indexer_primitives;
 use near_primitives::utils::from_timestamp;
 use std::env;
-use tracing_subscriber::EnvFilter;
 mod configs;
 mod db_adapters;
 mod metrics_server;
@@ -37,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
     
-    init_tracing();
+    init_tracing(opts.debug)?;
 
     // create a lake configuration with S3 information passed in as ENV vars
     let config = opts.get_lake_config().await;
@@ -77,32 +76,4 @@ async fn handle_streamer_message(
 
     BLOCK_PROCESSED_TOTAL.inc();
     Ok(streamer_message.block.header.height)
-}
-
-fn init_tracing() {
-    let mut env_filter = EnvFilter::new("near_lake_framework=info,indexer_events=info");
-
-    if let Ok(rust_log) = env::var("RUST_LOG") {
-        if !rust_log.is_empty() {
-            for directive in rust_log.split(',').filter_map(|s| match s.parse() {
-                Ok(directive) => Some(directive),
-                Err(err) => {
-                    tracing::warn!(
-                        target: crate::LOGGING_PREFIX,
-                        "Ignoring directive `{}`: {}",
-                        s,
-                        err
-                    );
-                    None
-                }
-            }) {
-                env_filter = env_filter.add_directive(directive);
-            }
-        }
-    }
-
-    tracing_subscriber::FmtSubscriber::builder()
-        .with_env_filter(env_filter)
-        .with_writer(std::io::stderr)
-        .init();
 }
