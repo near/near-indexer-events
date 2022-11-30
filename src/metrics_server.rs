@@ -60,27 +60,6 @@ async fn get_metrics() -> impl Responder {
     }
 }
 
-#[get("/probe")]
-async fn health_check() -> impl Responder {
-    // shows the last seen block height and difference between last block_timestamp and now
-    let latest_block_timestamp_diff = LATEST_BLOCK_TIMESTAMP_DIFF.get();
-    let last_seen_block_height = LAST_SEEN_BLOCK_HEIGHT.get();
-    let num_blocks_processed = BLOCK_PROCESSED_TOTAL.get();
-
-    let mut res = "".to_owned();
-    if last_seen_block_height != 0 {
-        res.push_str("\n Last seen block height: ");
-        res.push_str(last_seen_block_height.to_string().as_str());
-        res.push_str("\n Last seen block timestamp and current time difference (in seconds): ");
-        res.push_str(latest_block_timestamp_diff.to_string().as_str());
-        res.push_str("\n # of Blocks Processed thus far ");
-        res.push_str(num_blocks_processed.to_string().as_str());
-    } else {
-        res.push_str("\n Indexer is starting... ");
-    }
-    res
-}
-
 pub(crate) async fn init_metrics_server() -> anyhow::Result<(), std::io::Error> {
     let port: u16 = std::env::var("PORT")
         .unwrap_or_else(|_| String::from("3000"))
@@ -97,7 +76,7 @@ pub(crate) async fn init_metrics_server() -> anyhow::Result<(), std::io::Error> 
         "health probe on http://0.0.0.0:{port}/probe"
     );
 
-    HttpServer::new(|| App::new().service(get_metrics).service(health_check))
+    HttpServer::new(|| App::new().service(get_metrics))
         .bind(("0.0.0.0", port))?
         .run()
         .await

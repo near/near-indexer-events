@@ -19,7 +19,6 @@ dotenv = "0.15.0"
 futures = "0.3.5"
 hex = "0.4"
 itertools = "0.9.0"
-lazy_static = "1.4.0"
 num-traits = "0.2.11"
 primitive-types = { version = "0.10.0", default-features = false, features = ["rlp"] }
 regex = "1.6.0"
@@ -32,10 +31,9 @@ tokio = { version = "1.8", features = ["sync", "time", "macros", "rt-multi-threa
 tokio-stream = { version = "0.1" }
 tracing = "0.1.35"
 tracing-subscriber = { version = "0.3.11", features = ["fmt", "std", "env-filter"] }
+lazy_static = "1.4.0"
 prometheus = "0.13.1"
 quote = "1.0.17"
-aws-types= "0.13.0"
-aws-sdk-s3="0.13.0"
 actix-web = "=4.0.1"
 
 near-jsonrpc-primitives = "0.14.0"
