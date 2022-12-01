@@ -38,8 +38,7 @@ async fn main() -> anyhow::Result<()> {
     
     init_tracing(opts.debug)?;
 
-    // create a lake configuration with S3 information passed in as ENV vars
-    let config = opts.get_lake_config().await;
+    let config: near_lake_framework::LakeConfig = opts.to_lake_config().await;
     let (_lake_handle, stream) = near_lake_framework::streamer(config);
 
     tokio::spawn(async move {

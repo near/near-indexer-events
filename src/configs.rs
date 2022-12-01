@@ -23,12 +23,6 @@ pub(crate) struct Opts {
     /// AWS S3 bucket name to get the stream from
     #[clap(long, env)]
     pub s3_bucket_name: String,
-    /// AWS Access Key with the rights to read from AWS S3
-    #[clap(long, env)]
-    pub lake_aws_access_key: String,
-    #[clap(long, env)]
-    /// AWS Secret Access Key with the rights to read from AWS S3
-    pub lake_aws_secret_access_key: String,
     /// AWS S3 bucket region
     #[clap(long, env)]
     pub s3_region_name: String,
@@ -46,29 +40,11 @@ pub(crate) struct Opts {
 }
 
 impl Opts {
-    // Creates AWS Credentials for NEAR Lake
-    fn lake_credentials(&self) -> aws_types::credentials::SharedCredentialsProvider {
-        let provider = aws_types::Credentials::new(
-            self.lake_aws_access_key.clone(),
-            self.lake_aws_secret_access_key.clone(),
-            None,
-            None,
-            "events_indexer",
-        );
-        aws_types::credentials::SharedCredentialsProvider::new(provider)
-    }
-
-    /// Creates AWS Shared Config for NEAR Lake
-    pub fn lake_aws_sdk_config(&self) -> aws_types::sdk_config::SdkConfig {
-        aws_types::sdk_config::SdkConfig::builder()
-            .credentials_provider(self.lake_credentials())
-            .region(aws_types::region::Region::new(self.s3_region_name.clone()))
-            .build()
-    }
-
-    pub async fn get_lake_config(&self) -> near_lake_framework::LakeConfig {
-        let s3_config = aws_sdk_s3::config::Builder::from(&self.lake_aws_sdk_config()).build();
-        let config_builder = near_lake_framework::LakeConfigBuilder::default().s3_config(s3_config);
+    // returns a Lake Config object with AWS credentials passed in. 
+    // Will try to source the AWS credentials from .env file first, and then from .aws/credentials if not found. 
+    // https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html
+    pub async fn to_lake_config(&self) -> near_lake_framework::LakeConfig {
+        let config_builder = near_lake_framework::LakeConfigBuilder::default();
 
         tracing::info!(target: LOGGING_PREFIX, "Chain_id: {}", self.chain_id);
 
