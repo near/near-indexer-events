@@ -1,6 +1,5 @@
 // TODO cleanup imports in all the files in the end
-use crate::configs::{Opts, init_tracing};
-use near_primitives::time::Utc;
+use crate::configs::{init_tracing, Opts};
 use clap::Parser;
 use dotenv::dotenv;
 use futures::StreamExt;
@@ -8,6 +7,7 @@ use metrics_server::{
     init_metrics_server, BLOCK_PROCESSED_TOTAL, LAST_SEEN_BLOCK_HEIGHT, LATEST_BLOCK_TIMESTAMP_DIFF,
 };
 use near_lake_framework::near_indexer_primitives;
+use near_primitives::time::Utc;
 use near_primitives::utils::from_timestamp;
 use std::env;
 mod configs;
@@ -35,8 +35,8 @@ async fn main() -> anyhow::Result<()> {
     let opts: Opts = Opts::parse();
 
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
-    
-    init_tracing(opts.debug)?;
+
+    let _worker_guard = init_tracing(opts.debug)?;
 
     let config: near_lake_framework::LakeConfig = opts.to_lake_config().await;
     let (_lake_handle, stream) = near_lake_framework::streamer(config);
