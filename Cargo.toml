@@ -35,8 +35,6 @@ tracing-appender = "0.1.2"
 prometheus = "0.13.1"
 quote = "1.0.17"
 lazy_static = "1.4.0"
-aws-types= "0.13.0"
-aws-sdk-s3="0.13.0"
 actix-web = "=4.0.1"
 
 near-jsonrpc-primitives = "0.14.0"
