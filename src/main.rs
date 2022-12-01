@@ -3,16 +3,11 @@ use crate::configs::{init_tracing, Opts};
 use clap::Parser;
 use dotenv::dotenv;
 use futures::StreamExt;
-use metrics_server::{
-    init_metrics_server, BLOCK_PROCESSED_TOTAL, LAST_SEEN_BLOCK_HEIGHT, LATEST_BLOCK_TIMESTAMP_DIFF,
-};
 use near_lake_framework::near_indexer_primitives;
-use near_primitives::time::Utc;
-use near_primitives::utils::from_timestamp;
 use std::env;
 mod configs;
 mod db_adapters;
-mod metrics_server;
+mod metrics;
 mod models;
 
 #[macro_use]
@@ -49,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
         while let Some(_handle_message) = handlers.next().await {}
     });
 
-    init_metrics_server().await?;
+    metrics::init_metrics_server().await?;
 
     Ok(())
 }
@@ -58,6 +53,9 @@ async fn handle_streamer_message(
     streamer_message: near_indexer_primitives::StreamerMessage,
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<u64> {
+    metrics::BLOCK_PROCESSED_TOTAL.inc();
+    metrics::LATEST_BLOCK_HEIGHT.set(streamer_message.block.header.height.try_into().unwrap());
+
     if streamer_message.block.header.height % 100 == 0 {
         tracing::info!(
             target: crate::LOGGING_PREFIX,
@@ -66,13 +64,8 @@ async fn handle_streamer_message(
             streamer_message.shards.len()
         );
     }
-    LAST_SEEN_BLOCK_HEIGHT.set(streamer_message.block.header.height.try_into().unwrap());
-    let now = Utc::now();
-    let block_timestamp = from_timestamp(streamer_message.block.header.timestamp_nanosec);
-    LATEST_BLOCK_TIMESTAMP_DIFF.set((now - block_timestamp).num_seconds() as f64);
 
     db_adapters::events::store_events(pool, &streamer_message).await?;
 
-    BLOCK_PROCESSED_TOTAL.inc();
     Ok(streamer_message.block.header.height)
 }
