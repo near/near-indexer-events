@@ -54,7 +54,7 @@ impl Opts {
                 "CHAIN_ID is not set to a valid environment name. Try `mainnet` or `testnet`"
             ),
         }
-        .start_block_height(start_block_height)
+        .start_block_height(self.start_block_height)
         .build()
         .expect("Failed to build LakeConfig")
     }

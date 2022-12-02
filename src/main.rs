@@ -54,6 +54,7 @@ async fn handle_streamer_message(
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<u64> {
     metrics::BLOCK_PROCESSED_TOTAL.inc();
+    // Prometheus Guage Metric type only supports i64 and f64 types for the time being, so we need to cast the type into i64
     metrics::LATEST_BLOCK_HEIGHT.set(i64::try_from(streamer_message.block.header.height)?);
 
     if streamer_message.block.header.height % 100 == 0 {
