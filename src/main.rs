@@ -54,7 +54,7 @@ async fn handle_streamer_message(
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<u64> {
     metrics::BLOCK_PROCESSED_TOTAL.inc();
-    metrics::LATEST_BLOCK_HEIGHT.set(streamer_message.block.header.height.try_into().unwrap());
+    metrics::LATEST_BLOCK_HEIGHT.set(i64::try_from(streamer_message.block.header.height)?);
 
     if streamer_message.block.header.height % 100 == 0 {
         tracing::info!(

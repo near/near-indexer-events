@@ -48,16 +48,13 @@ impl Opts {
         tracing::info!(target: LOGGING_PREFIX, "Chain_id: {}", self.chain_id);
 
         match self.chain_id.as_str() {
-            "mainnet" => config_builder
-                .mainnet()
-                .start_block_height(self.start_block_height),
-            "testnet" => config_builder
-                .testnet()
-                .start_block_height(self.start_block_height),
+            "mainnet" => config_builder.mainnet(),
+            "testnet" => config_builder.testnet(),
             _ => panic!(
-                "CHAIN_ID is not set to a valid enviornment name. Try `mainnet` or `testnet`"
+                "CHAIN_ID is not set to a valid environment name. Try `mainnet` or `testnet`"
             ),
         }
+        .start_block_height(start_block_height)
         .build()
         .expect("Failed to build LakeConfig")
     }
