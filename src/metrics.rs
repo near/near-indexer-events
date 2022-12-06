@@ -3,16 +3,16 @@ use prometheus::{Encoder, IntCounter, IntGauge, Opts};
 
 use crate::LOGGING_PREFIX;
 
-pub type Result<T, E> = std::result::Result<T, E>;
+type Result<T, E> = std::result::Result<T, E>;
 
-pub fn try_create_int_counter(name: &str, help: &str) -> Result<IntCounter, prometheus::Error> {
+fn try_create_int_counter(name: &str, help: &str) -> Result<IntCounter, prometheus::Error> {
     let opts = Opts::new(name, help);
     let counter = IntCounter::with_opts(opts)?;
     prometheus::register(Box::new(counter.clone()))?;
     Ok(counter)
 }
 
-pub fn try_create_int_gauge(name: &str, help: &str) -> Result<IntGauge, prometheus::Error> {
+fn try_create_int_gauge(name: &str, help: &str) -> Result<IntGauge, prometheus::Error> {
     let opts = Opts::new(name, help);
     let gauge = IntGauge::with_opts(opts)?;
     prometheus::register(Box::new(gauge.clone()))?;
@@ -20,12 +20,12 @@ pub fn try_create_int_gauge(name: &str, help: &str) -> Result<IntGauge, promethe
 }
 
 lazy_static! {
-    pub static ref BLOCK_PROCESSED_TOTAL: IntCounter = try_create_int_counter(
+    pub(crate) static ref BLOCK_PROCESSED_TOTAL: IntCounter = try_create_int_counter(
         "indexer_events_total_blocks_processed",
         "Total number of blocks processed by indexer regardless of restarts. Used to calculate Block Processing Rate(BPS)"
     )
     .unwrap();
-    pub static ref LATEST_BLOCK_HEIGHT: IntGauge = try_create_int_gauge(
+    pub(crate) static ref LATEST_BLOCK_HEIGHT: IntGauge = try_create_int_gauge(
         "indexer_events_latest_block_height",
         "Last seen block height by indexer"
     )
@@ -50,12 +50,7 @@ async fn get_metrics() -> impl Responder {
     }
 }
 
-pub(crate) async fn init_metrics_server() -> anyhow::Result<(), std::io::Error> {
-    let port: u16 = std::env::var("PORT")
-        .unwrap_or_else(|_| String::from("3000"))
-        .parse()
-        .expect("Unable to parse `PORT`");
-
+pub(crate) async fn init_metrics_server(port: u16) -> anyhow::Result<()> {
     tracing::info!(
         target: LOGGING_PREFIX,
         "Starting metrics server on http://0.0.0.0:{port}/metrics"
@@ -65,4 +60,5 @@ pub(crate) async fn init_metrics_server() -> anyhow::Result<(), std::io::Error> 
         .bind(("0.0.0.0", port))?
         .run()
         .await
+        .map_err(|e| anyhow::anyhow!("Error while executing HTTP Server: {}", e))
 }
