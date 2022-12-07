@@ -37,3 +37,7 @@ If they are not the same, it means the data is inconsistent.
 
 When we meet the inconsistency, we mark such contract as "non-trusted".  
 If you want to fix this, you need to write/edit [legacy handler](src/db_adapters/coin/legacy/DOC.md) for your contract.
+
+### Contribution Guide
+
+Please refer to this [guide](https://github.com/near/near-indexer-for-explorer/blob/master/CONTRIBUTING.md) before submitting PRs to this repo 
