@@ -1,6 +1,6 @@
 use bigdecimal::{BigDecimal, ToPrimitive};
 use futures::future::try_join_all;
-use sqlx::{Row, Arguments};
+use sqlx::{Arguments, Row};
 use std::fmt::Write;
 
 pub use indexer_events::FieldCount;
