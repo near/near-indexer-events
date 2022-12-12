@@ -16,9 +16,9 @@ pub(crate) struct Opts {
     /// Enabled Indexer for Explorer debug level of logs
     #[clap(long)]
     pub debug: bool,
-    /// Block height to start the stream from
+    /// Block height to start the stream from. If None, start from interruption
     #[clap(long, short, env)]
-    pub start_block_height: u64,
+    pub start_block_height: Option<u64>,
     #[clap(long, short, env)]
     pub near_archival_rpc_url: String,
     // Chain ID: testnet or mainnet, used for NEAR Lake initialization
@@ -32,7 +32,7 @@ pub(crate) struct Opts {
 impl Opts {
     // returns a Lake Config object where AWS credentials are sourced from .env file first, and then from .aws/credentials if not found.
     // https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html
-    pub async fn to_lake_config(&self) -> near_lake_framework::LakeConfig {
+    pub async fn to_lake_config(&self, start_block_height: u64) -> near_lake_framework::LakeConfig {
         let config_builder = near_lake_framework::LakeConfigBuilder::default();
 
         tracing::info!(target: crate::LOGGING_PREFIX, "CHAIN_ID: {}", self.chain_id);
@@ -45,7 +45,7 @@ impl Opts {
                 invalid_chain
             ),
         }
-        .start_block_height(self.start_block_height)
+        .start_block_height(start_block_height)
         .build()
         .expect("Failed to build LakeConfig")
     }

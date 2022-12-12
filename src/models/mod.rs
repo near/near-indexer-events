@@ -1,4 +1,6 @@
+use bigdecimal::{BigDecimal, ToPrimitive};
 use futures::future::try_join_all;
+use sqlx::{Row, Arguments};
 use std::fmt::Write;
 
 pub use indexer_events::FieldCount;
@@ -114,4 +116,72 @@ pub(crate) fn create_placeholder(
     }
     item += ")";
     Ok(item)
+}
+
+pub async fn select_retry_or_panic(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+    query: &str,
+    substitution_items: &[String],
+    retry_count: usize,
+) -> anyhow::Result<Vec<sqlx::postgres::PgRow>> {
+    let mut interval = crate::INTERVAL;
+    let mut retry_attempt = 0usize;
+
+    loop {
+        if retry_attempt == retry_count {
+            return Err(anyhow::anyhow!(
+                "Failed to perform query to database after {} attempts. Stop trying.",
+                retry_count
+            ));
+        }
+        retry_attempt += 1;
+
+        let mut args = sqlx::postgres::PgArguments::default();
+        for item in substitution_items {
+            args.add(item);
+        }
+
+        match sqlx::query_with(query, args).fetch_all(pool).await {
+            Ok(res) => return Ok(res),
+            Err(async_error) => {
+                // todo we print here select with non-filled placeholders. It would be better to get the final select statement here
+                tracing::error!(
+                         target: crate::LOGGING_PREFIX,
+                         "Error occurred during {}:\nFailed SELECT:\n{}\n Retrying in {} milliseconds...",
+                         async_error,
+                    query,
+                         interval.as_millis(),
+                     );
+                tokio::time::sleep(interval).await;
+                if interval < crate::MAX_DELAY_TIME {
+                    interval *= 2;
+                }
+            }
+        }
+    }
+}
+
+pub(crate) async fn start_after_interruption(
+    pool: &sqlx::Pool<sqlx::Postgres>,
+) -> anyhow::Result<u64> {
+    let query = "SELECT MAX(block_height)
+                        FROM (
+                            SELECT block_height, block_timestamp
+                            FROM coin_events
+                            UNION ALL
+                            SELECT block_height, block_timestamp
+                            FROM nft_events
+                        ) AS combined_events
+                        GROUP BY block_timestamp
+                        ORDER BY block_timestamp desc
+                        LIMIT 1";
+    let res = select_retry_or_panic(pool, query, &[], 10).await?;
+    Ok(res
+        .first()
+        .map(|value| value.get::<BigDecimal, _>(0))
+        .expect("`START_BLOCK_HEIGHT` should be provided when the DB is empty")
+        .to_u64()
+        .expect("height should be positive")
+        // We start 1000 blocks before the latest block in the DB to be sure we haven't missed anything
+        .saturating_sub(1000))
 }

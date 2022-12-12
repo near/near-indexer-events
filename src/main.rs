@@ -28,12 +28,21 @@ pub struct AccountWithContract {
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     let opts: Opts = Opts::parse();
+    let _worker_guard = init_tracing(opts.debug)?;
 
     let pool = sqlx::PgPool::connect(&env::var("DATABASE_URL")?).await?;
 
-    let _worker_guard = init_tracing(opts.debug)?;
+    let start_block_height = match opts.start_block_height {
+        Some(x) => x,
+        None => models::start_after_interruption(&pool).await?,
+    };
+    tracing::info!(
+        target: LOGGING_PREFIX,
+        "Indexer will start from block {}",
+        start_block_height
+    );
 
-    let config: near_lake_framework::LakeConfig = opts.to_lake_config().await;
+    let config: near_lake_framework::LakeConfig = opts.to_lake_config(start_block_height).await;
     let (_lake_handle, stream) = near_lake_framework::streamer(config);
 
     tokio::spawn(async move {
