@@ -164,17 +164,13 @@ pub async fn select_retry_or_panic(
 pub(crate) async fn start_after_interruption(
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<u64> {
-    let query = "SELECT MAX(block_height)
-                        FROM (
-                            SELECT block_height, block_timestamp
-                            FROM coin_events
+    // Gets the highest block height from both the nft_events and coin_events table
+    let query = "SELECT Max(block_height)
+                       FROM (SELECT block_height
+                            FROM   coin_events
                             UNION ALL
-                            SELECT block_height, block_timestamp
-                            FROM nft_events
-                        ) AS combined_events
-                        GROUP BY block_timestamp
-                        ORDER BY block_timestamp desc
-                        LIMIT 1";
+                            SELECT block_height
+                            FROM   nft_events) AS combined_heights";
     let res = select_retry_or_panic(pool, query, &[], 10).await?;
     Ok(res
         .first()
