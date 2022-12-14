@@ -165,7 +165,7 @@ pub(crate) async fn start_after_interruption(
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<u64> {
     // Gets the highest block height from both the nft_events and coin_events table
-    let query = "SELECT Max(block_height)
+    let query = "SELECT MIN(block_height)
                        FROM (SELECT block_height
                             FROM   coin_events
                             UNION ALL
