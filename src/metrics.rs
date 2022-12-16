@@ -38,13 +38,17 @@ async fn get_metrics() -> impl Responder {
 
     let mut buffer = Vec::new();
     if let Err(e) = encoder.encode(&prometheus::gather(), &mut buffer) {
-        eprintln!("could not encode metrics: {}", e);
+        tracing::error!(target: LOGGING_PREFIX, "could not encode metrics: {}", e);
     };
 
     match String::from_utf8(buffer.clone()) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("custom metrics could not be from_utf8'd: {}", e);
+            tracing::error!(
+                target: LOGGING_PREFIX,
+                "custom metrics could not be from_utf8'd: {}",
+                e
+            );
             String::default()
         }
     }
