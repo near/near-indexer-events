@@ -6,9 +6,10 @@ use near_lake_framework::near_indexer_primitives;
 pub(crate) async fn store_events(
     pool: &sqlx::Pool<sqlx::Postgres>,
     streamer_message: &near_indexer_primitives::StreamerMessage,
+    chain_id: &str,
 ) -> anyhow::Result<()> {
     try_join!(
-        coin::store_ft(pool, streamer_message,),
+        coin::store_ft(pool, streamer_message, chain_id),
         nft::store_nft(pool, streamer_message),
     )?;
     Ok(())
