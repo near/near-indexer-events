@@ -38,7 +38,9 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::spawn(async move {
         let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
-            .map(|streamer_message| handle_streamer_message(streamer_message, &pool))
+            .map(|streamer_message| {
+                handle_streamer_message(streamer_message, &pool, &opts.chain_id)
+            })
             .buffer_unordered(1usize);
 
         let mut time_now = std::time::Instant::now();
@@ -71,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
 async fn handle_streamer_message(
     streamer_message: near_indexer_primitives::StreamerMessage,
     pool: &sqlx::Pool<sqlx::Postgres>,
+    chain_id: &str,
 ) -> anyhow::Result<u64> {
     metrics::BLOCK_PROCESSED_TOTAL.inc();
     // Prometheus Gauge Metric type do not support u64
@@ -86,7 +89,7 @@ async fn handle_streamer_message(
         );
     }
 
-    db_adapters::events::store_events(pool, &streamer_message).await?;
+    db_adapters::events::store_events(pool, &streamer_message, chain_id).await?;
 
     Ok(streamer_message.block.header.height)
 }

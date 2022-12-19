@@ -25,13 +25,14 @@ struct FtEvent {
 pub(crate) async fn store_ft(
     pool: &sqlx::Pool<sqlx::Postgres>,
     streamer_message: &near_indexer_primitives::StreamerMessage,
+    chain_id: &str,
 ) -> anyhow::Result<()> {
     let mut events: Vec<CoinEvent> = vec![];
 
     let events_futures = streamer_message
         .shards
         .iter()
-        .map(|shard| collect_ft_for_shard(streamer_message, shard));
+        .map(|shard| collect_ft_for_shard(streamer_message, shard, chain_id));
     for events_by_shard in try_join_all(events_futures).await? {
         events.extend(events_by_shard);
     }
@@ -55,6 +56,7 @@ pub(crate) fn filter_zeros_and_enumerate_events(
 async fn collect_ft_for_shard(
     streamer_message: &near_indexer_primitives::StreamerMessage,
     shard: &near_indexer_primitives::IndexerShard,
+    chain_id: &str,
 ) -> anyhow::Result<Vec<CoinEvent>> {
     let mut events: Vec<CoinEvent> = vec![];
 
@@ -67,6 +69,7 @@ async fn collect_ft_for_shard(
         &shard.shard_id,
         &shard.receipt_execution_outcomes,
         &streamer_message.block.header,
+        chain_id,
     );
     let (nep141_events, legacy_events) = try_join!(nep141_future, legacy_contracts_future)?;
 
