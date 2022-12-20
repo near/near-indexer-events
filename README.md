@@ -12,6 +12,37 @@ This solution collects balance-changing events about FTs, NFTs, etc.
 - We do not check the correctness of collected events, it should be done separately.
 - We can re-run infinite number of indexers writing at the same DB, they may index same or different parts of the blockchain. It should not break the flow.
 
+## Launching the indexer
+
+There are a few configuration options that this micro-indexer supports. Some variables *must* be passed in as Environmental variables in a `.env` file while other variables can be provided both as command line arguments and as environmental variables.
+
+### Environment Variables
+
+| Environmental Variable | Description | supported as CLI args or in `.env` | Required |
+| ---------------------- | ----------- | -------------------------- |  ------- |
+| `DATABASE_URL`  | Specifies the Postgres Database where the data will be written to. |  `.env` only  | Required |
+| `CHAIN_ID` | `mainnet` or `testnet` |  Both | Required |
+| `START_BLOCK_HEIGHT` | Specifies the block height at which the indexer will start indexing from. On an absolute fresh launch, this variable needs to be specified. To index the complete history of the blockchain, start this process from the [genesis block](https://explorer.near.org/stats) of the specified network. |  Both |  Required on fresh start|
+| `NEAR_ARCHIVAL_RPC_URL` | NEAR RPC Client | Both |  Required |
+| `AWS_ACCESS_KEY_ID` | AWS credentials to access stream of data from Near Lake. If this ENV variable is not specified in `.env`, it will try to find it in `~/.aws/credentials` | `.env` or from `~/.aws/crednetials` | required |
+| `AWS_SECRET_ACCESS_KEY` | AWS credentials to access stream of data from Near Lake. If this ENV variable is not specified in `.env`, it will try to find it in `~/.aws/credentials` | `.env` or from `~/.aws/crednetials` | required |
+| `DEBUG`  | Enables Debug level logs | Both | optional |
+| `PORT` | Specifies the port where the metrics server will run. | Both | optional, default port:` 3000`|
+
+After specifying all the required `REQUIRED` Environmental variables in an `.env` file, you may run the indexer by running
+```shell
+cargo run
+```
+or override configuration options by passing them along side `cargo run` like such. 
+> note: make sure REQUIRED env vars are defined in a `.env` file
+```shell
+cargo run  --  --near-archival-rpc-url https://archival-rpc.mainnet.near.org --port 3000 --chain-id mainnet --start-block-height 77134664
+```
+## Metrics Collection
+To track down issues related to performance of indexers as well as to be able to check the block height of an indexer, we expose two observable metrics from within the application. 
+- *Block Processing Rate* which shows the speed of proessing blocks. 
+- *Last block seen* by the indexer which shows us what block the indexer has indexed till. 
+
 ### Why existing `assets__*` tables are not enough?
 
 `assets__non_fungible_token_events`, `assets__fungible_token_events` do not have the sorting column.
